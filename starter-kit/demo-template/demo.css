@@ -1,0 +1,109 @@
+/* DEMO 骨架样式。够看就行——DEMO 的目的是引出「哪里不对」，不是好看。
+   ★但也别太丑：丑到让人第一句话是「这个界面好丑」，你就问不出真需求了。 */
+
+:root {
+  --ink: #1d2129;
+  --muted: #6b7280;
+  --line: #e5e7eb;
+  --panel: #f7f8fa;
+  --accent: #2f6f4f;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0 auto;
+  max-width: 680px;
+  padding: 0 20px 60px;
+  font: 16px/1.65 system-ui, -apple-system, "Segoe UI", "Noto Sans SC", sans-serif;
+  color: var(--ink);
+  background: #fff;
+}
+
+header { padding: 32px 0 8px; }
+h1 { margin: 0 0 4px; font-size: 24px; }
+h2 { font-size: 16px; font-weight: 600; margin: 0; }
+.muted { color: var(--muted); font-size: 14px; }
+
+section { margin-top: 28px; }
+
+.row-between {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.row-gap { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* ① 第一眼那个数 */
+.hero {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 22px;
+}
+.stat-label { color: var(--muted); font-size: 14px; }
+.stat-value {
+  font-size: 40px;
+  font-weight: 650;
+  letter-spacing: -0.5px;
+  margin: 4px 0 6px;
+  font-variant-numeric: tabular-nums;
+}
+.stat-note { margin: 0; }
+
+/* ② 清单 */
+.list { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.item:last-child { border-bottom: none; }
+.item-main { font-weight: 500; }
+.item-sub { font-size: 13px; }
+.item-value { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ③ 动作 */
+input, select, button {
+  font: inherit;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: inherit;
+}
+input { flex: 1; min-width: 200px; }
+button {
+  cursor: pointer;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 500;
+}
+button:hover { filter: brightness(1.08); }
+select { padding: 5px 9px; }
+
+footer {
+  margin-top: 40px;
+  padding-top: 16px;
+    border-top: 1px solid var(--line);
+  font-size: 14px;
+}
+footer p { margin: 6px 0; }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e6e8ea;
+    --muted: #9aa3ad;
+    --line: #333a42;
+    --panel: #22262b;
+    --accent: #4f9d74;
+  }
+  body { background: #16191d; }
+  .list, input, select { background: #1d2126; }
+}

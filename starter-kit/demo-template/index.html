@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DEMO · 改这里写你要做的东西</title>
+<link rel="stylesheet" href="demo.css">
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     这是一页**用来提问的** DEMO，不是原型。
+
+     怎么用：
+       1. 改 demo.js 顶部的 DATA（全是假数据，写得像真的）；
+       2. 改下面这三块的文字；
+       3. 双击本文件打开，拿给需求方点两下；
+       4. 只问一句：「你点一下，哪里不对？」
+
+     三条硬规矩：
+       · 不连后端、不装依赖、不建目录。单个文件夹三个文件，双击就开。
+       · 只做最核心的那一个画面。不做导航、不做设置页、不做登录。
+       · 做完就扔。★不要在它上面继续长功能。
+     ═══════════════════════════════════════════════════════════════ -->
+
+<header>
+  <h1 id="title">改这里：一句话说清这是什么</h1>
+  <p id="subtitle" class="muted">改这里：谁在什么场合打开它</p>
+</header>
+
+<!-- ① 最重要的那个数 / 那句话。打开页面第一眼看见的东西。 -->
+<section class="hero">
+  <div class="stat">
+    <div class="stat-label" id="statLabel">改这里：这个数叫什么</div>
+    <div class="stat-value" id="statValue">—</div>
+    <div class="stat-note muted" id="statNote">改这里：它旁边该有一句什么话</div>
+  </div>
+</section>
+
+<!-- ② 一张清单 / 一个列表。多数东西的主体都是这个形状。 -->
+<section>
+  <div class="row-between">
+    <h2 id="listTitle">改这里：这张清单叫什么</h2>
+    <label class="muted">筛 <select id="filter"></select></label>
+  </div>
+  <div id="list" class="list">读取中…</div>
+</section>
+
+<!-- ③ 一个动作。让人点一下，看看会发生什么——多数「不对」都在这里被说出来。 -->
+<section>
+  <h2 id="actionTitle">改这里：能做的那个动作</h2>
+  <form id="actionForm" class="row-gap">
+    <input id="actionInput" placeholder="改这里：让他输入什么" required>
+    <button type="submit">改这里：按钮上写什么</button>
+  </form>
+  <p id="actionResult" class="muted"></p>
+</section>
+
+<footer>
+  <p><strong>这是一页 DEMO，全部数据是假的。</strong>
+     它的用处是让你说出「不对，这里应该是……」——那句话才是真需求。</p>
+  <p class="muted">点一下上面任何地方。哪里不对？</p>
+</footer>
+
+<script src="demo.js"></script>
+</body>
+</html>
