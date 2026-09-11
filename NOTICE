@@ -1,0 +1,40 @@
+md-first
+Copyright 2026 comkocs
+
+原始出处：https://github.com/comkocs/md-first
+作者：comkocs
+
+本作品包含：
+
+  · 四份「怎么跟 AI 配合」的方法文档
+    （0-新手.md / 1-小型.md / 2-中型.md / 3-大型.md，及 frameworks/、starter-kit/）
+  · Ticket Desk 工单台（ticket-desk/）
+
+它们来自一个真实项目：一个人不写代码、只拍板，指挥十几个 AI 工位干活。
+文档里每一条规矩、代码里每一道闸，后面都有一次具体的事故。
+
+────────────────────────────────────────────────────────────────────────
+
+按 Apache License 2.0 第 4 条：
+
+  你可以自由使用、修改、再分发本作品，包括商业用途，不需要事先取得许可。
+
+  但**再分发或发布衍生作品时，本文件中的上述归属声明必须一并保留**，
+  并且改动过的文件要显著标注「已被修改」。
+
+  换句话说：拿去用、拿去改、拿去卖，都可以；
+  **只有一件事不可以——把它说成是你自己原创的。**
+
+────────────────────────────────────────────────────────────────────────
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.

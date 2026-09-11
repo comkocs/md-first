@@ -1,0 +1,8 @@
+# 仓里统一存 LF，Windows 检出时自动还原成 CRLF。
+# 新仓第一笔就定死，是唯一不会造成整仓改动噪音的时机。
+* text=auto
+
+*.png binary
+*.jpg binary
+*.webp binary
+*.ico binary

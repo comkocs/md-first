@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+
+# 本机配置与通道凭据一律不进仓
+*.token
+*.pem
+*.key
+*.crt
+remote.env
+
+# 编辑器与系统垃圾
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
