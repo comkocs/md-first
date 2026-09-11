@@ -1,0 +1,8 @@
+{
+  "域名": "desk.example.com",
+  "端口": "8443",
+  "安装目录": "/var/lib/ticket-desk",
+  "管理员用户名": "owner",
+  "服务名": "ticket-desk",
+  "服务账号": "ticket-desk"
+}

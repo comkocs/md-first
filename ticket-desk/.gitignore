@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+# 本机配置与通道凭据一律不进仓
+ticket_desk/config.json
+remote.env
+*.token
+*.pem
+*.key
+*.crt
+# 工单真数据永远不进仓:它每分钟都在变,进仓就是每次提交都冲突
+tickets/

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>工单台</title>
+<link rel="stylesheet" href="tickets.css">
+<body>
+<header>
+  <h1>工单台</h1>
+  <div id="state" class="state">读取当前值面…</div>
+</header>
+
+<nav>
+  <label>位 <select id="slot"><option value="">全部</option></select></label>
+  <label>状态 <select id="stateFilter"><option value="">全部</option></select></label>
+  <label>搜索 <input id="searchBox" type="search" placeholder="单号 / 标题 / 位名"></label>
+  <button id="searchButton">搜索</button>
+  <button id="refresh">刷新</button>
+  <span id="count"></span>
+</nav>
+
+<main id="list">读取中…</main>
+
+<footer>
+  <p>这是一个<strong>最小只读台面</strong>：看单、筛单、点开看细节。
+  建单、判卷、交板、并线一律走命令行 <code>ticket.py</code>——
+  写操作全都有署名闸与状态闸，做成网页按钮只会让人绕过它们。</p>
+  <p>要自己扩：全部数据来自 <code>GET /api/tickets</code>（列表，精简过）与
+  <code>GET /api/ticket/&lt;编号&gt;</code>（全文）。
+  增量刷新走 <code>GET /api/changes?cursor=&lt;上次的游标&gt;</code>。</p>
+</footer>
+
+<script src="tickets.js"></script>
+</body>
+</html>

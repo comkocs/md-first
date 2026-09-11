@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>工单台</title>
+  <link rel="stylesheet" href="tickets.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>工单台</h1>
+      <p id="sourceStatus">正在读取工单盘…</p>
+    </div>
+    <div id="stateBoard" class="top-actions state-board" title="当前值面：读它，不要抄进自己的接管件"></div>
+    <div class="top-actions">
+      <button id="forceReload" class="button ghost" type="button" title="丢掉本地缓存、整份重新取一次。平时不用点——增量刷新已经会自动核对;这是万一的退路">强制重取</button>
+      <a id="accountLink" class="button ghost" href="/account" hidden>我的令牌</a>
+    </div>
+  </header>
+  <nav id="mainNav" class="main-nav">
+    <button data-view="slots" class="active">总监位</button>
+    <button data-view="designer">设计者队列</button>
+    <button data-view="digest">总编排日览</button>
+    <button data-view="search">搜索</button>
+    <button data-view="new">新单</button>
+  </nav>
+  <div id="notice" class="notice" hidden></div>
+  <main id="app" aria-live="polite"></main>
+  <dialog id="modal"><button class="modal-close" aria-label="关闭">×</button><div class="modal-body"></div></dialog>
+  <!-- file:// 离线回落包，由 `ticket.py build` 生成。
+       ★只在 file:// 下加载：服务模式根本用不到它，而直接写死一个 <script src> 会在
+       没跑过 build 的仓上留一条 404 控制台红——一条永远不该出现、又永远修不掉的红，
+       会让人以后对控制台里的红视而不见。 -->
+  <script>if(location.protocol==="file:"){document.write('<script src="data\/tickets-bundle.js"><\/script>')}</script>
+  <script src="tickets.js"></script>
+  <script>if(location.protocol==='https:')document.querySelector('#accountLink').hidden=false;</script>
+</body>
+</html>

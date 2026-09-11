@@ -1,0 +1,118 @@
+:root {
+  --ink: #1d2129;
+  --muted: #6b7280;
+  --line: #e3e6ea;
+  --panel: #f7f8fa;
+  --accent: #2f6f4f;
+  --warn: #8a5a00;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0 20px 60px;
+  font: 15px/1.6 system-ui, -apple-system, "Segoe UI", "Noto Sans SC", sans-serif;
+  color: var(--ink);
+}
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 16px;
+  padding: 18px 0 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+h1 { margin: 0; font-size: 20px; }
+
+.state { color: var(--muted); font-size: 13px; }
+
+nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+nav label { color: var(--muted); font-size: 13px; }
+
+select, input, button {
+  font: inherit;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #fff;
+  color: inherit;
+}
+
+button { cursor: pointer; background: var(--panel); }
+button:hover { border-color: var(--accent); }
+
+#count { margin-left: auto; color: var(--muted); font-size: 13px; }
+
+main { display: grid; gap: 10px; padding-top: 14px; }
+
+.ticket {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--muted);
+  border-radius: 6px;
+  padding: 10px 14px;
+  background: #fff;
+}
+
+/* 状态只用左边那道色条区分，不整块染色：整块染色会让「有几张单」这件事
+   看起来像「出了几件事」，而多数状态其实完全正常。 */
+.ticket.state-返工, .ticket.state-阻塞 { border-left-color: #b4442f; }
+.ticket.state-待判, .ticket.state-待复检, .ticket.state-待答 { border-left-color: var(--warn); }
+.ticket.state-实机复验过, .ticket.state-关闭 { border-left-color: var(--accent); }
+.ticket.state-作废 { border-left-color: var(--line); opacity: .55; }
+
+.ticket h3 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+.ticket h3 a { color: var(--accent); text-decoration: none; }
+.ticket h3 a:hover { text-decoration: underline; }
+
+.meta { margin: 0; color: var(--muted); font-size: 13px; }
+.verdict { margin: 6px 0 0; font-size: 13px; }
+.omitted { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+.error { color: #b4442f; }
+
+details { margin-top: 8px; }
+summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+
+pre {
+  margin: 6px 0 0;
+  padding: 10px;
+  background: var(--panel);
+  border-radius: 5px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 13px;
+}
+
+footer {
+  margin-top: 28px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+code { background: var(--panel); padding: 1px 5px; border-radius: 4px; }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e6e8ea;
+    --muted: #9aa3ad;
+    --line: #333a42;
+    --panel: #22262b;
+    --accent: #6fbf8f;
+    --warn: #d7a03a;
+  }
+  body { background: #16191d; }
+  .ticket, select, input { background: #1d2126; }
+  button { background: var(--panel); }
+}
