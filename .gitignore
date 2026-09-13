@@ -3,12 +3,42 @@ __pycache__/
 .pytest_cache/
 node_modules/
 
-# 本机配置与通道凭据一律不进仓
+# 本机配置与通道凭据一律不进仓。
+# ★这一节防的不是本仓自己——本仓没有凭据——而是**你**：
+#   你把这套东西放进自己项目之后，误提交一次密钥就得作废重发，
+#   而 git 历史里删不干净（别人的 fork 和缓存里还留着）。宁可宽一点。
 *.token
 *.pem
 *.key
 *.crt
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa*
+id_ed25519*
+id_ecdsa*
+*.ppk
+.env
+.env.*
+!.env.example
 remote.env
+server.json
+credentials*
+secrets*
+
+# 数据、日志、备份、压缩包——体积大且常含真实数据
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*.bak
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
 
 # 编辑器与系统垃圾
 .DS_Store

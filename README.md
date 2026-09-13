@@ -280,4 +280,4 @@ python ticket_desk/ticket.py serve --open
 
 ---
 
-<sub>作者 comkocs ｜ 这套东西的来历与详细说明见公众号 **飞爷爷玩AI** ｜ Email:970457@qq.com</sub>
+<sub>作者 comkocs ｜ Email:970457@qq.com</sub>

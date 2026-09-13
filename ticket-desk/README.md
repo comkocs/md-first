@@ -476,4 +476,4 @@ python docs/make_screens.py          # 造演示数据 → 起服务 → 拍三�
 
 ---
 
-<sub>作者 comkocs ｜ 详细说明见公众号 **飞爷爷玩AI** ｜ Email:970457@qq.com</sub>
+<sub>作者 comkocs ｜ Email:970457@qq.com</sub>

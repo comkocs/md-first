@@ -19,6 +19,12 @@ set -euo pipefail
 OUT="${1:-/tmp/desk.tar}"
 REF="${2:-HEAD}"
 
+# ★不靠「你在哪个目录跑」,按脚本自己的位置定位 ticket-desk/。
+#   否则 `bash ticket-desk/deploy/pack.sh`(在仓根跑)会因为找不到 ticket_desk 而失败,
+#   而那是个很自然的敲法。$OUT 先转成绝对路径,免得 cd 之后写错地方。
+[[ "$OUT" = /* ]] || OUT="$PWD/$OUT"
+cd "$(dirname "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)")"
+
 command -v git >/dev/null 2>&1 || { echo "拦下:找不到 git。" >&2; exit 2; }
 git rev-parse --git-dir >/dev/null 2>&1 || { echo "拦下:当前目录不在 git 仓里。" >&2; exit 2; }
 
@@ -34,9 +40,21 @@ if [[ -n "$(git status --porcelain -- ticket_desk web)" ]]; then
   exit 2
 fi
 
+# ★ticket-desk 可能是仓根,也可能是别的仓里的一个子目录(例如 md-first/ticket-desk)。
+#   后者的话,git archive 会给每个条目加上「子目录相对仓根」的前缀,包内就变成
+#   ticket-desk/deploy/... —— 而下面的回验和 update.sh 都按「包内以 deploy/ 开头」找文件,
+#   于是打包看着成功、回验却读不到,报出来的还是一句误导人的「git 版本太低」。
+#   用 <提交>:<子目录> 这种 tree-ish 让子目录当包根,并且**从仓根执行**
+#   (否则 pathspec 会被再加一次当前目录前缀),两种布局打出来的包就完全一样。
+TOPLEVEL="$(git rev-parse --show-toplevel)"
+SUBDIR="$(git rev-parse --show-prefix)"          # 仓根时为空;子目录时形如 ticket-desk/
+TREEISH="$REF"
+[[ -n "$SUBDIR" ]] && TREEISH="$REF:${SUBDIR%/}"
+
 # --add-virtual-file=<路径>:<内容>（git 2.38+）：不落临时文件，直接把提交号写进包内固定位置。
-git archive --format=tar \
-  --add-virtual-file="deploy/DEPLOY_HEAD:$HEAD_SHORT" \n  "$REF" ticket_desk deploy tests $(git ls-tree --name-only "$REF" web 2>/dev/null) > "$OUT"
+( cd "$TOPLEVEL" && git archive --format=tar \
+    --add-virtual-file="deploy/DEPLOY_HEAD:$HEAD_SHORT" \
+    "$TREEISH" ticket_desk deploy tests $(git ls-tree --name-only "$TREEISH" web 2>/dev/null) ) > "$OUT"
 
 # ★★打完必须**回验**,不许只打印一句「已写进包内」就完事。
 #   本脚本第一版就是这么错的:用了一个根本不存在的 git 选项
@@ -46,8 +64,11 @@ git archive --format=tar \
 PACKED="$(tar xOf "$OUT" deploy/DEPLOY_HEAD 2>/dev/null | tr -d '[:space:]' || true)"
 if [[ "$PACKED" != "$HEAD_SHORT" ]]; then
   echo "拦下:部署头没能写进包里(读回「${PACKED:-空}」,期望「$HEAD_SHORT」)。" >&2
-  echo "  多半是这台机器的 git 不支持 --add-virtual-file(需要 2.38+):$(git --version)" >&2
-  echo "  升级 git,或上服时显式带上环境变量:DEPLOY_HEAD=$HEAD_SHORT sudo bash …/update.sh …" >&2
+  echo "  包内实际的头几项:" >&2
+  tar tf "$OUT" 2>/dev/null | head -3 | sed 's/^/    /' >&2
+  echo "  ——若这几项带着多余的目录前缀,是包根取错了(本脚本用 $TREEISH 当包根)。" >&2
+  echo "  ——若包是空的或根本没这一项,再看 git 版本:--add-virtual-file 需要 2.38+,当前 $(git --version)" >&2
+  echo "  兜底:上服时显式带上环境变量 DEPLOY_HEAD=$HEAD_SHORT sudo bash …/update.sh …" >&2
   rm -f "$OUT"   # 半成品不留在盘上,免得有人拿它去上服
   exit 3
 fi
