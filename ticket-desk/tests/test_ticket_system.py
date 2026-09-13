@@ -1374,17 +1374,33 @@ class TransferAndHumanGateTests(TicketTestCase):
         ticket = self.service.transfer(ticket["编号"], "总编排", "请总编排复核", "设计者")
         self.assertEqual("待答", ticket["状态"])
 
-    def test_non_three_party_say_is_rejected_with_exact_reason(self):
-        # T-000837 起，拒的话里多了一句「带 --ref 就能在自己那张单上留言」的出路；
-        # 三方之外仍然拒，这一条不变。
+    def test_say_takes_any_slot_and_rejects_unregistered_signatures(self):
+        # 原来这一条钉的是「三方之外一律拒」，连总监之间传一句话也拒；
+        # 那条路被真用起来之后才发现它堵死的是「传话」本身——一句话的事只剩「建一张疑问单」，
+        # 而疑问单是要人答的、会进对方待答队列。现在位名一侧放开，方向翻过来钉：
+        # 在册位名放行、不在册的署名照拒、**员工那条窄缝一个字没放松**。
         expected = TicketService.SAY_REFUSED
-        self.assertIn("对话线只有设计者、本位总监、总编排三方", expected)
+        self.assertIn("总监之间可互相对话", expected)
+        # ① 别位总监现在能说，而且那一行的发言人就是他本人——串门的顾虑由留痕兜着
+        row = self.service.say(SLOT, OTHER_SLOT, "别位总监跨位说一句")
+        self.assertEqual(OTHER_SLOT, row["发言人"])
+        self.assertNotIn("【员工留言】", row["文字"])   # 总监不是员工,不该被打上员工留言前缀
+        # ② 员工不带 --ref:照旧拒
         with self.assertRaises(TicketError) as caught:
             self.service.say(SLOT, self.worker, "员工不带 --ref 仍然进不去")
         self.assertEqual(expected, str(caught.exception))
+        # ③ 压根不在名册里的署名:拒
         with self.assertRaises(TicketError) as caught:
-            self.service.say(SLOT, OTHER_SLOT, "别位总监不跨位聊天")
+            self.service.say(SLOT, "路过的谁", "不在册的署名进不去")
         self.assertEqual(expected, str(caught.exception))
+
+    def test_say_and_say_uploaded_share_one_gate(self):
+        """两条入口共用 _slot_may_say——同一个事实两处各拼一份必然漂，这里钉住它只有一份。"""
+        source = inspect.getsource(TicketService)
+        self.assertEqual(2, source.count("self._slot_may_say(actor) or by_staff"))
+        self.assertNotIn("{OWNER_ROLE, CONDUCTOR_SLOT, slot}", source)
+        row = self.service.say_uploaded(SLOT, OTHER_SLOT, "别位总监走网页台面也能说")
+        self.assertEqual(OTHER_SLOT, row["发言人"])
 
     def test_cross_slot_ticket_records_origin_and_is_copied_to_digest(self):
         ticket = self.service.create_question("疑问", OTHER_SLOT, "跨位求证", "请后端总监答复", initiator=self.worker)
@@ -3372,6 +3388,121 @@ exit 0
         self.assertIn("TEST_RC=$?", script)
         self.assertIn("set -euo pipefail", script)
         self.assertNotIn("pytest tests -q | tail", script)
+
+
+class ReleaseVersionTests(unittest.TestCase):
+    """发布版本号有两处(代码里一处、CHANGELOG 顶上一处),钉住它们不许漂。
+
+    ★两处各写一份的东西必然漂——发版那天漏改一处,以后谁也说不清线上跑的是哪一版。
+    """
+
+    @staticmethod
+    def changelog() -> Path | None:
+        """CHANGELOG 在仓根。ticket-desk 可能是仓根,也可能是别的仓里的子目录。"""
+        for candidate in (ROOT / "CHANGELOG.md", ROOT.parent / "CHANGELOG.md"):
+            if candidate.is_file():
+                return candidate
+        return None
+
+    def test_the_version_in_code_matches_the_top_of_the_changelog(self):
+        from ticket_desk import __version__
+
+        self.assertRegex(__version__, r"^\d+\.\d+$")
+        changelog = self.changelog()
+        if changelog is None:
+            self.skipTest(f"{PACKAGE_TREE_SKIP_PREFIX},上服包里没有仓根的 CHANGELOG.md。")
+        versions = re.findall(r"^## (\d+\.\d+)$", changelog.read_text(encoding="utf-8"), re.MULTILINE)
+        self.assertTrue(versions, "CHANGELOG 里一条版本记录都没有")
+        self.assertEqual(versions[0], __version__, "代码里的版本号与 CHANGELOG 最上面那条对不上")
+
+    def test_the_release_version_is_not_the_protocol_version(self):
+        """两个号管的是两件事,别哪天被人对齐成一个。"""
+        from ticket_desk import __version__
+
+        self.assertNotEqual(str(channel_config.PROTOCOL_VERSION), __version__)
+
+
+@unittest.skipUnless(shutil.which("git") and shutil.which("tar"), "本机没有 git 或 tar,打不了包")
+class PackedTreeIsSelfSufficientTests(unittest.TestCase):
+    """★真打一次包、解出来、在**解包目录**里核它自带了跑闸链要用的东西。
+
+    这一组堵的是「单机跑得通」与「上服跑得通」之间那条缝。那条缝一次次以同一个形状出现:
+    打包少打一个文件、install 少拷一个目录、配置放在会被上服删掉的位置——
+    共同点是**在仓树上永远看不见**,只有真打一次包才露头。
+    最贵的一次:pack.sh 不打 README.md,而闸②里有两条用例直接读它,
+    于是一个照文档操作的新使用方,**第一次上服就被自己的闸拦死**,
+    报出来还长得像「你的测试坏了」,不像「包少打了一个文件」。
+    ★所以这里不 grep pack.sh 的源码——源码里写着要打什么不算数,包里真有才算数。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        """把**当前这棵树**捧进一个临时 git 仓再打包,不打真仓的 HEAD。
+
+        ★两个理由,都要紧:
+          ① pack.sh 有一道「工作树脏就拦」的闸(它是对的:打包打的是提交,
+             没提交的东西进不了包)。可是开发期工作树**总是**脏的——
+             直接对真仓打包,这一组就永远走跳过分支,等于没有这道闸,
+             而「跳过」正是本仓一再写的那个静默漏洞的形状。
+          ② 打当前树才能立刻验到**这次的改动**:改了 pack.sh 要当场看见效果,
+             而不是提交完才知道打漏了文件。
+        真仓一个字节都不碰:只读地拷出来,commit 落在临时目录里。
+        """
+        cls.temporary = tempfile.TemporaryDirectory()
+        repository = Path(cls.temporary.name) / "repo"
+        ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", "tickets", "config.json")
+        for name in ("ticket_desk", "tests", "deploy", "web"):
+            if (ROOT / name).is_dir():
+                shutil.copytree(ROOT / name, repository / name, ignore=ignore)
+        repository.mkdir(parents=True, exist_ok=True)
+        if (ROOT / "README.md").is_file():
+            shutil.copy2(ROOT / "README.md", repository / "README.md")
+        git = ["git", "-c", "user.email=t@example.invalid", "-c", "user.name=t",
+               "-c", "commit.gpgsign=false"]
+        for argv in ([*git, "init", "-q"], [*git, "add", "-A"], [*git, "commit", "-qm", "pack"]):
+            done = subprocess.run(argv, cwd=str(repository), capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace")
+            if done.returncode != 0:
+                raise unittest.SkipTest(f"临时仓建不起来,跳过:{(done.stderr or done.stdout).strip()[:200]}")
+        # ★输出用相对路径:pack.sh 判绝对路径用的是 `= /*`,而 Git Bash 下的
+        #   `C:/...` 不以 / 开头,会被当成相对路径再拼一次 $PWD。服务器上是 posix 路径,
+        #   那条判断在真实场景没问题,所以这里绕开它,不改脚本。
+        packed = subprocess.run(
+            ["bash", str(repository / "deploy" / "pack.sh").replace("\\", "/"), "../desk.tar"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=str(repository),
+        )
+        assert packed.returncode == 0, f"pack.sh 打包失败：\n{packed.stdout}\n{packed.stderr}"
+        cls.unpacked = Path(cls.temporary.name) / "unpacked"
+        cls.unpacked.mkdir()
+        subprocess.run(["tar", "xf", "../desk.tar"], cwd=str(cls.unpacked), check=True)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        if hasattr(cls, "temporary"):
+            cls.temporary.cleanup()
+
+    def test_the_package_carries_everything_the_gate_chain_reads(self):
+        """闸链要读的每一样都得在包里。缺一样,闸② 就会在服务器上**每次都拦**。"""
+        for relative in ("ticket_desk", "tests", "deploy", "deploy/DEPLOY_HEAD", "README.md"):
+            with self.subTest(relative=relative):
+                self.assertTrue((self.unpacked / relative).exists(), f"上服包里缺 {relative}")
+
+    def test_the_two_readme_tests_really_run_in_the_unpacked_tree(self):
+        """★不是「README 在包里」就完了——要在**解包目录**里把那两条真跑一遍。
+
+        「文件在包里」与「用例在包里读得到它」是两件事:包根取错一层,文件也在包里,
+        用例照样 FileNotFoundError。所以这里跑的是真 pytest,不是查文件在不在。
+        """
+        done = subprocess.run(
+            [sys.executable, "-m", "pytest", "tests/test_ticket_system.py", "-q", "-rs",
+             "-p", "no:cacheprovider", "-k", "readme_has_the_three_line or protocol_readme_documents"],
+            cwd=str(self.unpacked), env=clean_environment(self.unpacked / "tickets"),
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        self.assertEqual(0, done.returncode, done.stdout + done.stderr)
+        self.assertIn("2 passed", done.stdout)
+        self.assertNotIn("skipped", done.stdout)      # 补包,不是给用例加跳过
+        self.assertNotIn("FileNotFoundError", done.stdout + done.stderr)
 
 
 class PackageTreeGateTests(unittest.TestCase):

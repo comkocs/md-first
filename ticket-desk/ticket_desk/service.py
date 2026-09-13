@@ -450,6 +450,29 @@ def memory_archive_path(path: Path) -> Path:
     return path.with_name(f"{path.stem}.archive.md")
 
 
+# 「盘符开头」或「\\ 开头」= Windows 风格的绝对路径。
+WINDOWS_ABSOLUTE_PATH = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\)")
+
+
+def path_is_for_another_machine(path: str) -> bool:
+    """这个路径写的是**另一台机器**的盘吗——判「本机查得了它吗」，不判「远程模式吗」。
+
+    远程模式下路径由客户端给、命令在服务端跑：服务器上根本没有 D: 盘，
+    拿它去查服务端自己的文件系统，结论永远是「不存在」。这里判的是路径的**形状**，
+    不需要谁把「我是远程」这个标志一路传进来——标志会漏传，形状不会。
+    ★同一个文件里 write_memory 早就把这件事写明了（「远程模式下服务器上没有 D: 盘，
+      所以由客户端在自己这台机器上写」），只有 staff_fix 那条校验没跟上，于是恒定误报。
+    """
+    text = str(path or "").strip()
+    if not text:
+        return False
+    if os.name == "nt":
+        # 本机是 Windows：posix 绝对路径（/srv/…）是别人家的。
+        # ★只认 / 开头，不认 \ 开头——后者在 Windows 上是本盘根目录的合法写法。
+        return text.startswith("/")
+    return bool(WINDOWS_ABSOLUTE_PATH.match(text))
+
+
 def normalize_handoff(value: str | list[Any] | None) -> list[dict[str, str]]:
     """把 --handoff 的多行文本收成「留给下一窗」的行清单。
 
@@ -533,23 +556,21 @@ class TicketService:
                 "按影响面用需求/疑问单广播给各位;实现单由收到广播的那一位自己的总监派。"
                 f"要把活派出去,请用 ask --type 需求 --slot <干活的那一位> --by {slot}。"
             )
-        if task_tier is None:
-            raise TicketError("不能建派单：任务档必填，请用 --tier 甲、乙或丙。")
-        self._validate_task_tier(task_tier, context_lines)
+        # ★缺项一次报全,不要撞一条补一条。派单有五条必填,分散在两层闸上;
+        #   逐条拒的话人要重敲三四遍长命令行,而每敲一遍都是一次手抖的机会。
+        # ★「给的值不合法」与「没给」是两件事,次序照旧:档位给了就先验它的值
+        #   (丙档的预算闸挂在这里),验完再数缺项。
+        delivery_rows = normalize_lines(deliverables)
+        if task_tier is not None:
+            self._validate_task_tier(task_tier, context_lines)
+        missing = self.missing_dispatch_requirements(
+            task_tier=task_tier, deliverables=delivery_rows, internal=internal,
+            system_generated=system_generated,
+        )
+        if missing:
+            raise TicketError(self.format_missing_requirements(missing))
         # 先验后取号：非法值要在 next_ticket_id() 之前拒掉，否则一个错字白烧一个单号（T-000070）。
         window = normalize_window(window)
-        delivery_rows = normalize_lines(deliverables)
-        if not delivery_rows and not system_generated:
-            raise TicketError("不能建派单：交付项必填，请逐行写出本单必须产出的文件。")
-        # T-000831:以前 internal 默认 False,「忘了标」和「确实是用户可感知」在台账里长得一模一样,
-        # 直到交板被图片闸拦住才炸(T-000807)。建单那一刻就必须二选一明写,服务端是唯一真闸。
-        if internal is None:
-            raise TicketError(
-                "不能建派单：这张单是内部工具单（交板给验证命令与原样输出）还是用户可感知单"
-                f"（交板必须附 {LIVE_ORIGIN}图）？"
-                "--internal 与 --user-facing 二选一，必须明写——"
-                "漏标会让内部单在交板那一刻才炸（T-000807）。"
-            )
         if assign:
             self.require_active_staff(slot, assign)
         ticket_id = self.store.next_ticket_id()
@@ -560,6 +581,54 @@ class TicketService:
         self._add_staff_history(assign, ticket_id)
         self._notify_slots((slot,), initiator, f"{initiator} 建了派单 {ticket_id} · {title}", ticket_id)
         return ticket
+
+    @staticmethod
+    def missing_dispatch_requirements(
+        *,
+        consumer: str | None = None,
+        sources: list[str] | str | None = None,
+        task_tier: str | None = "",
+        deliverables: list[str] | None = None,
+        internal: bool | None = False,
+        system_generated: bool = False,
+        include_entry_gates: bool = False,
+    ) -> list[str]:
+        """派单缺哪几项——**一次数完**，一条缺项一句话。
+
+        派单的必填闸有五条，分在两层：`--consumer`/`--source` 由入口拦，
+        `--tier`/`--deliverable`/可感知标记由服务端拦（服务端仍是唯一真闸）。
+        原先五条各自 raise，撞一条补一条：一张单要重敲三四遍长命令行，
+        而每重敲一遍都是一次手抖的机会。判据抽在这里给两层共用，报的时候一次列全。
+        ★每条的话**一字未改**，还是原来那句——这些话里写着各自是哪次事故换来的，
+          改写它们是另一件事，不该搭本次的车。这里变的只有「一次说几条」。
+        ★include_entry_gates 只给入口用：服务端不默认查那两条，那会收紧现有服务层口径。
+        """
+        missing: list[str] = []
+        if include_entry_gates:
+            if not str(consumer or "").strip():
+                missing.append(f"派单必须写实机消费者(本单产物在{LIVE_SCENE}链上被谁加载),填不出=不发车。")
+            rows = [sources] if isinstance(sources, str) else list(sources or [])
+            if not any(str(value).strip() for value in rows):
+                missing.append("派单必须写真源指针(本单执行依据在哪个文件或哪条决定),填不出=不发车。")
+        if task_tier is None:
+            missing.append("任务档必填，请用 --tier 甲、乙或丙。")
+        if not normalize_lines(deliverables or []) and not system_generated:
+            missing.append("交付项必填，请逐行写出本单必须产出的文件。")
+        if internal is None:
+            missing.append(
+                "这张单是内部工具单（交板给验证命令与原样输出）还是用户可感知单"
+                f"（交板必须附 {LIVE_ORIGIN}图）？"
+                "--internal 与 --user-facing 二选一，必须明写——"
+                "漏标会让内部单在交板那一刻才炸（T-000807）。"
+            )
+        return missing
+
+    @staticmethod
+    def format_missing_requirements(missing: list[str]) -> str:
+        if len(missing) == 1:
+            return f"不能建派单：{missing[0]}"
+        head = f"不能建派单：还缺 {len(missing)} 项，请一次补齐——"
+        return head + "".join(f"\n  · {line}" for line in missing)
 
     def create_question(
         self,
@@ -2131,9 +2200,11 @@ class TicketService:
         不落，唤醒段就不亮，B 位那扇窗永远不知道有事等它（各位总监的窗口不会自己醒，
         没人把话贴进去它就不运行）。连撞两次：T-000259、T-000249。
 
-        ★为什么绕开 say 的三方门禁：say 只收设计者/本位总监/总编排，跨位调用会被拦下；
-          而这一行是「系统替 A 在 B 的账上记一笔」，不是 A 跑到 B 的对话线里发言。
-          下一个人别把那道门禁补到这里来——补上去唤醒段就又不亮了。
+        ★为什么绕开 say 的署名闸：say 的位名一侧现在已经放开到「任何在册位名」，
+          但**发起人可能是员工**——员工走 say 要带 --ref 且那张单指派给他本人，
+          而这里落的通知既不带单号也未必是他自己的单，照 say 的判据会被拦下。
+          何况这一行是「系统替 A 在 B 的账上记一笔」，不是 A 跑到 B 的对话线里发言。
+          下一个人别把那道闸补到这里来——补上去唤醒段就又不亮了。
         ★发言人一律填真正的动作发起人，不能填成目标位自己：前端 slotUnreadForOwner 的过滤条件是
           「发言人 !== 该位」，填成目标位这一行永远不会被算成它的未读，等于没写。
           自己给自己位建单时发言人本来就等于该位，那一行不计未读是对的——不需要唤醒自己。
@@ -2422,13 +2493,19 @@ class TicketService:
         member["固定工位标记时间"] = now_text()
         member["固定工位标记人"] = actor.strip()
         self.store.save_staff(staff)
-        parent = Path(path).expanduser().parent
         warning = ""
-        if not parent.is_dir():
-            warning = (
-                f"提醒：记忆件的父目录还不在（{parent}）。标记照常打上了；"
-                f"第一次跑 memory export --staff {name} 时会替你把目录建出来。"
-            )
+        if path_is_for_another_machine(path):
+            # 远程模式:命令在服务端跑,而这个路径指的是客户端那台机器的盘。
+            # 拿它去查服务端自己的文件系统,答案永远是「不存在」——那不是提醒,是噪音,
+            # 而恒定响的提醒会把人训练成不看提醒。
+            warning = "（服务端看不到你那台机器的盘，父目录这一条没校验。）"
+        else:
+            parent = Path(path).expanduser().parent
+            if not parent.is_dir():
+                warning = (
+                    f"提醒：记忆件的父目录还不在（{parent}）。标记照常打上了；"
+                    f"第一次跑 memory export --staff {name} 时会替你把目录建出来。"
+                )
         return dict(member, 所属总监位=slot, 提示=warning)
 
     def staff_unfix(self, name: str, actor: str) -> dict[str, Any]:
@@ -2639,7 +2716,8 @@ class TicketService:
     def _staff_may_say(self, slot: str, actor: str, reference: str) -> bool:
         """员工能不能往本位对话线写一句（T-000837）。
 
-        原口径是「对话线只收设计者、本位总监、总编排三方」，本意是别让别位串门。
+        位名那一侧的判据见 _slot_may_say（现在收「拍板人 + 任何在册位名」）；这里管的是
+        **不在名册里的署名**——员工。原口径连员工也一并拒，本意是别让别位串门，
         但它顺带把**执行方在自己那张单上留一句话**也堵死了：block 会改状态、submit 要等活干完，
         于是员工遇到卡点只能停在半路等人来问（T-000814 上撞到过）。
         设计者当天定的口径是「不能因为其他客观原因阻塞员工」，所以这里只开一条很窄的缝：
@@ -2659,8 +2737,23 @@ class TicketService:
             return False
         return str(ticket.get("指派给", "")).strip() == actor.strip()
 
+    @staticmethod
+    def _slot_may_say(actor: str) -> bool:
+        """署名人能不能往**任何**位的对话线发言（员工那条窄缝不看这里，在 _staff_may_say）。
+
+        原口径是「对话线只收拍板人、本位总监、总编排三方」，本意是别让别位串门。
+        但它把「总监 A 找总监 B 说一句」也一并堵死了：一句「我这边上完服了，你那边可以开窗」
+        的事，只剩下建一张疑问单这条路——而疑问单是**要人答的**，会进对方的待答队列，
+        它不是用来传话的。为一句话占一个单号，人就干脆不说了，这是缺了一条路，不是权限设计。
+        所以放开成「拍板人 + 任何在册位名」。别位串门的顾虑由留痕兜着：
+        对话线每一行都写死发言人，谁说的赖不掉。
+        ★员工那条窄缝一个字没放松：仍然必须带 --ref，且那张单指派给他本人。
+        ★say 与 say_uploaded 共用这一个判据。同一个事实两处各拼一份必然漂——本仓在别处栽过。
+        """
+        return actor == OWNER_ROLE or actor in SLOTS
+
     SAY_REFUSED = (
-        f"对话线只有{OWNER_ROLE}、本位总监、{CONDUCTOR_SLOT}三方;找别位请建疑问单或转交。"
+        f"对话线收{OWNER_ROLE}与任何在册位名(总监之间可互相对话);你署名的不在名册里。"
         "★员工要在自己经手的单上留一句话,请带上 --ref <你那张单号>——"
         "指派给你本人的单可以留言,不必停下来等人问。"
     )
@@ -2671,7 +2764,7 @@ class TicketService:
         if not text.strip() and not image_path:
             raise TicketError("对话文字和图片不能同时为空。")
         by_staff = self._staff_may_say(slot, actor, reference)
-        allowed = actor in {OWNER_ROLE, CONDUCTOR_SLOT, slot} or by_staff
+        allowed = self._slot_may_say(actor) or by_staff
         if not allowed:
             raise TicketError(self.SAY_REFUSED)
         if reference:
@@ -2700,7 +2793,7 @@ class TicketService:
         if not text.strip() and not images:
             raise TicketError("对话文字和图片不能同时为空。")
         by_staff = self._staff_may_say(slot, actor, reference)
-        allowed = actor in {OWNER_ROLE, CONDUCTOR_SLOT, slot} or by_staff
+        allowed = self._slot_may_say(actor) or by_staff
         if not allowed:
             raise TicketError(self.SAY_REFUSED)
         if reference:

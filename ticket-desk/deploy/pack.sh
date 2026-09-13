@@ -32,11 +32,13 @@ HEAD_SHORT="$(git rev-parse --short=9 "$REF")"
 # ★工作树脏就拦:打包打的是 $REF 那个**提交**,工作区里未提交的改动一个字都不会进包。
 #   不拦的话,人改完没提交就打包上服,线上跑的是旧代码而他以为是新的——
 #   这种「上服了但没生效」最难查,因为哪一步都没报错。
-if [[ -n "$(git status --porcelain -- ticket_desk web)" ]]; then
-  echo "拦下:ticket_desk 或 web 有未提交的改动。" >&2
+#   ★README.md 也算在内:它进包(见下面那段),而且闸②里有两条用例直接读它——
+#     本地改了 README 让用例绿、打完包上服却红,是同一个坑的另一面。
+if [[ -n "$(git status --porcelain -- ticket_desk web tests README.md)" ]]; then
+  echo "拦下:ticket_desk、web、tests 或 README.md 有未提交的改动。" >&2
   echo "  打包打的是提交 $HEAD_SHORT,工作区里没提交的东西进不了包。" >&2
   echo "  请先提交(或 git stash),再重跑本脚本。" >&2
-  git status --short -- ticket_desk web >&2
+  git status --short -- ticket_desk web tests README.md >&2
   exit 2
 fi
 
@@ -51,10 +53,18 @@ SUBDIR="$(git rev-parse --show-prefix)"          # 仓根时为空;子目录时�
 TREEISH="$REF"
 [[ -n "$SUBDIR" ]] && TREEISH="$REF:${SUBDIR%/}"
 
+# ★README.md 必须进包:tests 里有两条**文档一致性**用例会读它
+#   (通道那三行、协议版本与安全降级白名单)。它不在包里的话,那两条不是跳过、是
+#   FileNotFoundError 直接红——于是 update.sh 的闸② **每一次上服都被拦死**,
+#   而报出来的样子像「你的测试坏了」,不像「包少打了一个文件」。
+#   ★这里选的是补包,不是给那两条用例加跳过:跳过等于在上服闸里永久关掉两道文档闸,
+#     而「跳过」正是下一个静默漏洞的形状。补进去之后它们在服务器上照样真跑。
 # --add-virtual-file=<路径>:<内容>（git 2.38+）：不落临时文件，直接把提交号写进包内固定位置。
 ( cd "$TOPLEVEL" && git archive --format=tar \
     --add-virtual-file="deploy/DEPLOY_HEAD:$HEAD_SHORT" \
-    "$TREEISH" ticket_desk deploy tests $(git ls-tree --name-only "$TREEISH" web 2>/dev/null) ) > "$OUT"
+    "$TREEISH" ticket_desk deploy tests \
+    $(git ls-tree --name-only "$TREEISH" README.md 2>/dev/null) \
+    $(git ls-tree --name-only "$TREEISH" web 2>/dev/null) ) > "$OUT"
 
 # ★★打完必须**回验**,不许只打印一句「已写进包内」就完事。
 #   本脚本第一版就是这么错的:用了一个根本不存在的 git 选项
