@@ -1589,32 +1589,76 @@ class TicketService:
         match = STAFF_PATTERN.fullmatch(actor.strip())
         return match.group("slot") if match else actor.strip()
 
+    def internal_live_by_deploy_record(self, ticket: dict[str, Any]) -> bool:
+        """能不能拿**那笔上服记录**当实机证据,把内部单从「已合并」显式收到终态。
+
+        ★先说清它**不是**什么:内部单并线之后**本来就已经是终态**
+        (`is_terminal` / `is_done_for_staff` 对「已合并 + 非用户可感知」都返回 True),
+        既不进老化告警、也不占执行方的手。所以这条边解决的**不是**「单子卡住没人管」,
+        而是「想把它显式关掉时没有路」——台账上它永远显示「已合并」而不是「关闭」。
+
+        真正的缺陷在于**出口与报错对不上**:想 close 要「实机复验过」;想补 live 要一张真登录图,
+        而这类单(命令行工具、只读接口)根本没有界面截不出来;想 `live --shot 免独图`,
+        旧闸只认「**已经**实机复验过、只欠一张独图」的单;而 `close --not-deployed` 会拒绝它,
+        理由是「提交号已在部署头里,代码在线上跑着,欠的只是一笔 live 记账」——
+        **那句话把真相说得很准,却指向了一条对这类单走不通的路**。
+        `awaiting_live_record()` 这个判据早就在了,也已经被用来把这类单从「卡住了」里摘出去,
+        只是没有一条边让它真的收口。这里补的就是那条边。
+
+        判据三条,全是**机器能核的事实**,缺一不可——它们不需要任何人做判断:
+          ① 状态 = 已合并;② 单上标着非用户可感知;③ 单上那个提交号已经出现在当前值面的部署头里。
+        三条都中时,实机证据就是那笔上服记录本身:代码确实在线上跑着,这件事比任何截图都硬。
+        """
+        return (
+            str(ticket.get("状态", "")) == "已合并"
+            and bool(ticket.get("非用户可感知"))
+            and self.awaiting_live_record(ticket)
+        )
+
     def shot_exempt(self, ticket_id: str, actor: str, reason: str) -> dict[str, Any]:
-        """给「实机复验过·待独图」的单打免独图（D9-402 ②）。不碰 attach、不要求 world 图，但必须留下原因。"""
+        """给「实机复验过·待独图」的单打免独图（D9-402 ②）。不碰 attach、不要求 world 图，但必须留下原因。
+
+        ★另一条入口:内部单可以直接从「已合并」走这条路收口，判据见
+          internal_live_by_deploy_record()（三条机器判据全中才算）。
+        """
         signer = actor.strip()
         ticket = self.store.load_ticket(ticket_id)
-        if self._signer_slot(signer) not in {REVIEW_SLOT, CONDUCTOR_SLOT}:
+        by_deploy_record = self.internal_live_by_deploy_record(ticket)
+        # ★署名闸只在这条边上放宽,而且理由很具体:免独图本来只有复检席与总编排能打,
+        #   因为那是一个**判断**(这张单该不该补图)。走上服记录这条边时它不是判断而是**核对**
+        #   (是不是内部单?提交号在不在部署头里?),机器自己就能核完,所以本位总监也能签。
+        #   ★三条机器判据任一不成立,by_deploy_record 立刻为假,署名闸当场收回原样。
+        allowed = {REVIEW_SLOT, CONDUCTOR_SLOT}
+        if by_deploy_record:
+            allowed.add(str(ticket.get("所属总监位", "")).strip())
+        if self._signer_slot(signer) not in allowed:
             raise TicketError(
                 f"不能给 {ticket['编号']} 打{SHOT_EXEMPT}：--by 写的是「{signer or '空'}」。"
                 f"{SHOT_EXEMPT}只有「{REVIEW_SLOT}」或「{CONDUCTOR_SLOT}」能打；"
                 f"本位总监与员工窗都不行，请找复检席或{CONDUCTOR_SLOT}代办。"
             )
-        if ticket.get("状态") != "实机复验过":
-            raise TicketError(
-                f"不能给 {ticket['编号']} 打{SHOT_EXEMPT}：现在是「{ticket['状态']}」。"
-                "豁免只对已经实机复验过、只欠一张独图的单成立；没复验过的单请照常 live。"
-            )
-        if ticket.get("实机图标记", "") != "待独图":
-            raise TicketError(
-                f"不能给 {ticket['编号']} 打{SHOT_EXEMPT}：实机图标记现在是「{ticket.get('实机图标记', '') or '空'}」。"
-                "只有「待独图」的单欠着一张独图，才谈得上豁免。"
-            )
+        if not by_deploy_record:
+            if ticket.get("状态") != "实机复验过":
+                raise TicketError(
+                    f"不能给 {ticket['编号']} 打{SHOT_EXEMPT}：现在是「{ticket['状态']}」。"
+                    "豁免只对已经实机复验过、只欠一张独图的单成立；没复验过的单请照常 live。"
+                    "★例外：非用户可感知的单并线并上服之后，可以直接从「已合并」走这条路"
+                    "（要求单上标着非用户可感知，且它的提交号已在当前值面部署头里）。"
+                )
+            if ticket.get("实机图标记", "") != "待独图":
+                raise TicketError(
+                    f"不能给 {ticket['编号']} 打{SHOT_EXEMPT}：实机图标记现在是「{ticket.get('实机图标记', '') or '空'}」。"
+                    "只有「待独图」的单欠着一张独图，才谈得上豁免。"
+                )
         text = reason.strip()
         if not text:
             raise TicketError(
                 f"不能给 {ticket['编号']} 打{SHOT_EXEMPT}：--reason 不能为空，"
                 "要写清这张单为什么不用补独图（诊断类单无用户可见产出，或验证对象已退役）。"
             )
+        if by_deploy_record:
+            # 实机证据 = 那笔上服记录。这里把状态推到「实机复验过」,close 才有路可走。
+            ticket["状态"] = "实机复验过"
         ticket["实机图标记"] = SHOT_EXEMPT
         ticket[SHOT_EXEMPT_REASON] = text
         self.store.save_ticket(ticket, "live", signer, f"{SHOT_EXEMPT} · {text}")

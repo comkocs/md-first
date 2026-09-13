@@ -20,7 +20,7 @@
 
 ```bash
 git clone https://github.com/comkocs/md-first.git && cd md-first/ticket-desk
-python -m pytest tests -q                    # 524 条全绿（成绩随「在哪跑」变，见下表）
+python -m pytest tests -q                    # 535 条全绿（成绩随「在哪跑」变，见下表）
 python ticket_desk/ticket.py env             # 一行说清当前是本机模式还是远程模式
 python ticket_desk/ticket.py staff list      # 名册（第一次跑会顺手建库）
 ```
@@ -35,9 +35,9 @@ python ticket_desk/ticket.py staff list      # 名册（第一次跑会顺手建
 
 | 在哪跑 | 成绩 | 那些 skip 是什么 |
 |---|---|---|
-| 完整仓树 | `524 passed` | 无 |
-| 完整仓树，但包目录下有 `config.json` | `523 passed, 1 skipped` | 「包目录下已有 `config.json`（运行者自己的），不覆盖它」 |
-| 上服包 + 服务器（root、无 node） | `518 passed, 6 skipped` | 1 条「root 下会真去动系统目录」+ 5 条「这台机器上没有 node」 |
+| 完整仓树 | `535 passed` | 无 |
+| 完整仓树，但包目录下有 `config.json` | `534 passed, 1 skipped` | 「包目录下已有 `config.json`（运行者自己的），不覆盖它」 |
+| 上服包 + 服务器（root、无 node） | `529 passed, 6 skipped` | 1 条「root 下会真去动系统目录」+ 5 条「这台机器上没有 node」 |
 
 ★**第二种最容易被误判成回归**：凡是给自己配过 `ticket_desk/config.json` 的人，
 一跑测试就会看到那个 skip。它是有意的，不是坏了。
@@ -496,7 +496,7 @@ python docs/make_screens.py          # 造演示数据 → 起服务 → 拍三�
 **反馈**：某一道闸说不出它防的是哪一次具体事故，就该删。
 发现这类问题、或使用中撞到坑，欢迎开
 [Issue](https://github.com/comkocs/md-first/issues)。
-**1.01 整版来自一份上服实践反馈**：对方照 [`deploy/上服清单.md`](deploy/上服清单.md) 真装了一遍，
+**1.01 / 1.02 两版都来自同一份上服实践反馈**：对方照 [`deploy/上服清单.md`](deploy/上服清单.md) 真装了一遍，
 八条问题都是装的过程中撞到的。报问题时写清**在哪一步、哪种环境**撞到的，比贴一段代码更有用。
 
 **改了什么**：见 [CHANGELOG](../CHANGELOG.md)。

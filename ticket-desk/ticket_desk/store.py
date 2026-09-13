@@ -95,6 +95,8 @@ class TicketStore:
         # 名册一旦建出来，真源就是 slots.json：总监会在上面手改主力集合、停用某个模型。
         # 这里若按 config 回写，那些手改会在下一次任何命令跑起来时被悄悄冲掉——
         # 「配置文件改了一个字，线上名册全被重置」是这类迁移最典型的事故形态。
+        # ★但这条只对**手改项**成立（主力模型集合 / 模型名册 / 停用阈值），对**位名**不成立，
+        #   见下面「位名成员必须跟着 config 走」那一段。
         slots = self.read_json(self.slots_path, self._default_slots())
         changed_slots = False
         defaults = self._default_slots()
@@ -106,6 +108,35 @@ class TicketStore:
             if "主力模型" not in row:
                 row["主力模型"] = True
                 changed_slots = True
+        # ── 位名**成员**必须跟着 config 走 ──────────────────────────────────
+        # 位名不是手改项：它由 config 定，而另一半代码（argparse 的 choices、
+        # say / transfer / create 的判据）全程直接读 config.SLOTS。
+        # 两边一旦不一致就是劈脑，而且是**静默**的：
+        #   · 网页按 slots.json 渲染「转给指定总监」的下拉 ⇒ 列出来的位服务端当场拒收；
+        #   · 「要你去唤醒的窗口」也按它逐位查未读 ⇒ **真实位的对话线压根没被遍历**，
+        #     say 写进去多少条都不会冒出来——这个症状比前一个更难查，因为它连报错都没有。
+        # 触发它不需要谁做错事：装机脚本「先起服务、后写 TICKET_CONFIG」就够了——
+        # 首次启动那一下拿示例名册建了库，之后进程读对了配置，库里那份却再没人校正。
+        # ★紧挨着的员工桶本来就是按 SLOTS 补的（见下面 for slot in SLOTS）：
+        #   同一个函数里一半跟 config、一半不跟，这本身就是那个劈脑的形状。
+        roster_before = json.dumps(slots.get("总监位"), ensure_ascii=False, sort_keys=True)
+        configured_rows: list[dict[str, Any]] = []
+        known = {str(row.get("名字", "")): row for row in slots.get("总监位", [])}
+        for name in SLOTS:
+            row = known.pop(name, None) or {"名字": name, "主力模型": True}
+            row["名字"], row["启用"] = name, True
+            configured_rows.append(row)
+        # config 里已经没有的位：**停用而不是删掉**——历史单的「所属总监位」还引用着它们，
+        # 删了那些单就成了孤儿。前端本来就按「启用!==false」过滤，停用即从下拉里消失。
+        for row in known.values():
+            row["启用"] = False
+            configured_rows.append(row)
+        # ★先快照再比对：上面那些 row 是**原地改**的，而它们同时还挂在 slots["总监位"] 里。
+        #   不先把「改前」序列化下来，比对时「改前」已经等于「改后」，
+        #   于是永远判定没变、永远不落盘——闸看着在跑，其实一次都没生效。
+        if roster_before != json.dumps(configured_rows, ensure_ascii=False, sort_keys=True):
+            slots["总监位"] = configured_rows
+            changed_slots = True
         if changed_slots:
             self.atomic_json(self.slots_path, slots)
 

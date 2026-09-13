@@ -693,6 +693,82 @@ class BanLineCountTests(TicketTestCase):
         self.assertIn("model-c", self.service.store.load_staff()["模型停用"]["全项目"])
 
 
+class SlotRosterFollowsConfigTests(unittest.TestCase):
+    """位名成员必须跟着 config 走;手改项(主力模型集合 / 模型名册 / 停用阈值)一个字不许被回写。
+
+    ★这个 bug 是**静默**的:slots.json 的位名是建库那一刻落下来的,之后再不校正,
+      而另一半代码(argparse 的 choices、say / transfer / create 的判据)全程直读 config.SLOTS。
+      两边不一致时,网页按 slots.json 渲染出来的位服务端当场拒收;更难查的是
+      「要你去唤醒的窗口」——它也按 slots.json 逐位查未读,于是**真实位的对话线压根没被遍历**,
+      say 写进去多少条都不冒出来,连一个字的报错都没有。
+    ★触发它不需要谁做错事:装机脚本「先起服务、后写 TICKET_CONFIG」就够了。
+
+    ★写这一组时值得记住的一跤:`_migrate_metadata()` 是 **`ensure()`** 调的,不是 `__init__`。
+      光 `TicketStore(root)` 什么都不会发生——那样测的是一个根本没跑过的迁移。
+    """
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name) / "tickets"
+
+    def build(self, roster: list[dict[str, Any]]) -> dict[str, Any]:
+        """先把一份**陈旧**名册摆进库,再跑一次 ensure(),看它校正成什么样。"""
+        store = TicketStore(self.root)
+        store.ensure()                                   # ★先建库,再覆盖成陈旧的那份
+        slots = store.read_json(store.slots_path, {})
+        slots["总监位"] = roster
+        store.atomic_json(store.slots_path, slots)
+        TicketStore(self.root).ensure()                  # ★迁移挂在 ensure() 上,不是 __init__
+        return TicketStore(self.root).read_json(store.slots_path, {})
+
+    def test_stale_roster_is_corrected_to_config(self):
+        after = self.build([{"名字": "示例总监位", "启用": True, "主力模型": True}])
+        names = [row["名字"] for row in after["总监位"] if row.get("启用") is not False]
+        self.assertEqual(list(model.SLOTS), names, "在册位名必须与 config.SLOTS 一致")
+
+    def test_slot_dropped_from_config_is_disabled_not_deleted(self):
+        """★停用而不是删掉:历史单的「所属总监位」还引用着它,删了那些单就成了孤儿。"""
+        after = self.build(
+            [{"名字": name, "启用": True, "主力模型": True} for name in model.SLOTS]
+            + [{"名字": "已经撤掉的位", "启用": True, "主力模型": True}]
+        )
+        row = next(r for r in after["总监位"] if r["名字"] == "已经撤掉的位")
+        self.assertFalse(row["启用"], "撤掉的位要停用")
+        self.assertIn("已经撤掉的位", [r["名字"] for r in after["总监位"]], "但不许从库里抹掉")
+
+    def test_hand_edited_fields_are_never_written_back(self):
+        """★反面,也是这一组最要紧的一条:手改项一个字都不许被 config 冲掉。
+
+        「按 config 回写会把手改冲掉」正是原来不校正位名的理由,那个顾虑对这些字段完全成立。
+        位名跟着 config 走,不等于整份名册跟着 config 走。
+        """
+        store = TicketStore(self.root)
+        store.ensure()
+        slots = store.read_json(store.slots_path, {})
+        slots["主力模型集合"] = ["只剩这一个"]
+        slots["停用阈值"] = {"同位": 99, "全项目": 98}
+        slots["模型名册"] = [{"模型": "手改进去的", "状态": "在用", "可选档位": ["high"]}]
+        slots["总监位"] = [{"名字": "示例总监位", "启用": True, "主力模型": True}]
+        store.atomic_json(store.slots_path, slots)
+        TicketStore(self.root).ensure()
+        after = TicketStore(self.root).read_json(store.slots_path, {})
+        self.assertEqual(["只剩这一个"], after["主力模型集合"])
+        self.assertEqual({"同位": 99, "全项目": 98}, after["停用阈值"])
+        self.assertEqual([{"模型": "手改进去的", "状态": "在用", "可选档位": ["high"]}], after["模型名册"])
+
+    def test_hand_edits_on_a_row_that_stays_are_kept(self):
+        """在册位那一行上的手改要留住:校正的是**成员**,不是把每一行推倒重建。"""
+        first = model.SLOTS[0]
+        after = self.build(
+            [{"名字": first, "启用": True, "主力模型": False, "备注": "手写的一句"}]
+        )
+        row = next(r for r in after["总监位"] if r["名字"] == first)
+        self.assertFalse(row["主力模型"], "行内手改项要留住")
+        self.assertEqual("手写的一句", row.get("备注"))
+        self.assertTrue(row["启用"])
+
+
 class SqliteStoreTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -1117,6 +1193,75 @@ class LiveShotTests(TicketTestCase):
         ticket = self.service.live(ticket["编号"], str(self.picture("already-unique.png")), "独立复检", "独图")
         with self.assertRaisesRegex(TicketError, "只有实机图标记为.*待独图"):
             self.service.live(ticket["编号"], str(self.picture("repeat.png")), "独立复检", "独图")
+
+
+class InternalLiveByDeployRecordTests(TicketTestCase):
+    """内部单并线并上服之后,可以拿那笔上服记录当实机证据**显式收口**。
+
+    ★这一组补的不是「解死锁」:内部单并线本来就已经是终态(is_terminal 为真),
+      不进老化、不占执行方的手。它补的是**出口**——想把这类单显式关掉时,
+      close 要「实机复验过」、live 要一张它根本截不出来的登录图、
+      旧的免独图闸只认「已经复验过」,而 close --not-deployed 又会拒绝它,
+      理由是「代码在线上跑着,欠的只是一笔 live 记账」——那句话准,却指向一条走不通的路。
+    ★三条判据全是机器能核的事实,任一不成立,老闸与署名闸都当场收回原样(见下面两条反面用例)。
+    """
+
+    REASON = "内部工具单,无用户可见界面;实机证据是那笔上服记录"
+    HEAD = "abc1234de"
+
+    def deployed_internal(self, title: str = "内部单已上服", *, internal: bool = True,
+                          record_head: str | None = HEAD):
+        ticket = self.to_merged(title, internal=internal)
+        stored = self.service.store.load_ticket(ticket["编号"])
+        stored["判语"] = f"判过。判的是提交 {self.HEAD}。"
+        self.service.store.atomic_json(self.service.store.item_path(stored["编号"]), stored)
+        if record_head is not None:
+            self.service.state_set("deploy_head", record_head, service_module.REVIEW_SLOT)
+        return self.service.store.load_ticket(stored["编号"])
+
+    def test_three_facts_all_hold_so_it_closes_through_the_deploy_record(self):
+        ticket = self.deployed_internal()
+        self.assertTrue(self.service.internal_live_by_deploy_record(ticket))
+        done = self.service.shot_exempt(ticket["编号"], "复检·合并与部署-01", self.REASON)
+        self.assertEqual("实机复验过", done["状态"])
+        self.assertEqual("免独图", done["实机图标记"])
+        self.assertEqual(self.REASON, done["免独图原因"])
+        # 收到「实机复验过」之后,close 那条路才真的通——这才是本组的目的
+        closed = self.service.close(done["编号"], "总编排")
+        self.assertEqual("关闭", closed["状态"])
+
+    def test_the_owning_director_may_sign_only_on_this_edge(self):
+        """署名放宽只在这条边上:走它时是**核对**(是不是内部单、上没上服),不是判断。"""
+        ticket = self.deployed_internal("本位总监也能签")
+        done = self.service.shot_exempt(ticket["编号"], SLOT, self.REASON)
+        self.assertEqual("实机复验过", done["状态"])
+
+    def test_user_facing_ticket_does_not_take_this_edge(self):
+        """★反面:用户可感知单照旧要真登录图,一个字没放松。"""
+        ticket = self.deployed_internal("用户可感知单", internal=False)
+        self.assertFalse(self.service.internal_live_by_deploy_record(ticket))
+        with self.assertRaisesRegex(TicketError, "现在是「已合并」"):
+            self.service.shot_exempt(ticket["编号"], "复检·合并与部署-01", self.REASON)
+
+    def test_internal_ticket_not_yet_deployed_does_not_take_this_edge(self):
+        """★反面:没上服的内部单不走这条边——实机证据是那笔上服记录,没记录就没证据。"""
+        ticket = self.deployed_internal("没上服的内部单", record_head="99999999")
+        self.assertFalse(self.service.internal_live_by_deploy_record(ticket))
+        with self.assertRaisesRegex(TicketError, "现在是「已合并」"):
+            self.service.shot_exempt(ticket["编号"], "复检·合并与部署-01", self.REASON)
+
+    def test_signature_gate_snaps_back_when_the_edge_does_not_hold(self):
+        """★反面中最要紧的一条:边不成立时,本位总监**立刻**签不动。
+
+        放宽署名与放宽状态是同一个 by_deploy_record 控制的。要是哪天有人把这两件事拆开,
+        就会出现「边不成立、署名却还开着」的口子——那等于本位总监能给任何单打免独图。
+        """
+        ticket = self.deployed_internal("没上服所以签不动", record_head="99999999")
+        with self.assertRaises(TicketError) as caught:
+            self.service.shot_exempt(ticket["编号"], SLOT, self.REASON)
+        self.assertIn(SLOT, str(caught.exception))
+        self.assertIn("只有", str(caught.exception))
+        self.assertEqual("已合并", self.service.store.load_ticket(ticket["编号"])["状态"])
 
 
 class ShotExemptTests(TicketTestCase):
