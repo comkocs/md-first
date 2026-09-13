@@ -194,8 +194,18 @@ def parser() -> argparse.ArgumentParser:
     deploy_record = commands.add_parser("deploy-record")
     deploy_record.add_argument("--head", required=True, help="线上现在跑的提交号")
     deploy_record.add_argument("--probes", default="", help="探针原样输出:服务 active / 端口在听 / 首页 302 …")
-    deploy_record.add_argument("--repo", dest="repo", default=DEPLOY_TARGETS[0], choices=list(DEPLOY_TARGETS),
-                               help="上服目标(见 config「部署目标」);决定写回哪个值面键、记录归哪一位")
+    # ★「部署目标」允许为空：不上服的人（只拿工单台当台账）没有部署目标可填。
+    #   空表时不能取 [0] 当默认值——那会在**构建参数表的那一刻**就 IndexError 崩掉，
+    #   于是 `staff list`、`new` 这些跟部署毫不相干的命令也一起打不开，
+    #   而报错指向 argparse 内部，看不出是配置的问题。
+    #   空表时把这个选项留成「无默认值、无候选集」，真去跑 deploy-record 才报人话。
+    if DEPLOY_TARGETS:
+        deploy_record.add_argument("--repo", dest="repo", default=DEPLOY_TARGETS[0], choices=list(DEPLOY_TARGETS),
+                                   help="上服目标(见 config「部署目标」);决定写回哪个值面键、记录归哪一位")
+    else:
+        deploy_record.add_argument("--repo", dest="repo", default="",
+                                   help="上服目标——当前配置的「部署目标」是空的，"
+                                        "要用 deploy-record 得先在 config 里配一个")
     deploy_record.add_argument("--ticket", dest="batch_tickets", action="append", default=[], help="批内单号,可重复")
     deploy_record.add_argument("--by", default="部署脚本")
 
@@ -545,6 +555,14 @@ def execute(args: argparse.Namespace, service: TicketService) -> tuple[Any, str]
         ticket, hint = service.verify(args.ticket, args.by, args.result, args.gates, args.evidence)
         return {"工单": ticket, "提示": hint}, compact_ticket(ticket) + (f"\n{hint}" if hint else "")
     if command == "deploy-record":
+        # 「部署目标」为空时上面那个选项没有候选集，这里给一句人话，
+        # 而不是让它带着空 repo 往下走、在更深的地方报一个看不懂的错。
+        if not DEPLOY_TARGETS:
+            raise TicketError(
+                "配置里的「部署目标」是空的，没有可记的上服目标。"
+                "只把工单台当台账用的话，不需要 deploy-record；"
+                "要用就先在 config 的「部署目标」里配一个（名字 / 值面键 / 归位）。"
+            )
         ticket = service.deploy_record(args.head, args.probes, args.batch_tickets, args.repo, args.by)
         return ticket, compact_ticket(ticket) + f"\n上服记录已建,免判免复检;部署头已写进当前值面。取证请另开取证单。"
     if command == "evidence-ticket":
