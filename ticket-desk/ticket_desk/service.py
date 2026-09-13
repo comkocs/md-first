@@ -467,7 +467,7 @@ def path_is_for_another_machine(path: str) -> bool:
     if not text:
         return False
     if os.name == "nt":
-        # 本机是 Windows：posix 绝对路径（/srv/…）是别人家的。
+        # 本机是 Windows：posix 绝对路径（/home/… 这种）是别人家的。
         # ★只认 / 开头，不认 \ 开头——后者在 Windows 上是本盘根目录的合法写法。
         return text.startswith("/")
     return bool(WINDOWS_ABSOLUTE_PATH.match(text))
