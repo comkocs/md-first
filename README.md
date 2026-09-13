@@ -262,6 +262,7 @@
 frameworks/                                   深度资料，升档之后再看
 starter-kit/                                  习惯模板、DEMO 骨架、分档决策树
 ticket-desk/                                  工单台（中型和大型要装）
+CHANGELOG.md                                  每版改了什么、为什么
 LICENSE  NOTICE                               Apache-2.0
 ```
 

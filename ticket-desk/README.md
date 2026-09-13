@@ -20,7 +20,7 @@
 
 ```bash
 git clone https://github.com/comkocs/md-first.git && cd md-first/ticket-desk
-python -m pytest tests -q                    # 521 条，应当全绿
+python -m pytest tests -q                    # 524 条全绿（成绩随「在哪跑」变，见下表）
 python ticket_desk/ticket.py env             # 一行说清当前是本机模式还是远程模式
 python ticket_desk/ticket.py staff list      # 名册（第一次跑会顺手建库）
 ```
@@ -30,6 +30,17 @@ python ticket_desk/ticket.py staff list      # 名册（第一次跑会顺手建
 要多机/多人协作再看 [`deploy/上服清单.md`](deploy/上服清单.md)。
 
 需要 Python 3.10+；只有图片相关功能需要 Pillow（`pip install pillow`）。
+
+### 测试成绩按「在哪跑」分三种，都是正常的
+
+| 在哪跑 | 成绩 | 那些 skip 是什么 |
+|---|---|---|
+| 完整仓树 | `524 passed` | 无 |
+| 完整仓树，但包目录下有 `config.json` | `523 passed, 1 skipped` | 「包目录下已有 `config.json`（运行者自己的），不覆盖它」 |
+| 上服包 + 服务器（root、无 node） | `518 passed, 6 skipped` | 1 条「root 下会真去动系统目录」+ 5 条「这台机器上没有 node」 |
+
+★**第二种最容易被误判成回归**：凡是给自己配过 `ticket_desk/config.json` 的人，
+一跑测试就会看到那个 skip。它是有意的，不是坏了。
 
 ## 第一件事：把配置改成你自己的
 
@@ -338,6 +349,18 @@ ticket.py new --slot 后端 --title "接入登录限流" \
   --source "DECISIONS.md:限流" --consumer "网关 middleware 链" \
   --deliverable "server/middleware/ratelimit.py" \
   --tier 乙 --internal --by 总编排
+# 派单有五项必填(--consumer --source --tier --deliverable 和 --internal/--user-facing)。
+# 缺几项就一次列几项,不用撞一条补一条。
+
+# 带任务书的完整三步:先拿号 → 再按号写文件 → 然后转「已核存在」
+# ① {ticket} 占位符要配 --taskbook-unchecked:此刻文件还不存在,不跳过校验建不出来
+ticket.py new --slot 后端 --title "接入登录限流" \
+  --source "DECISIONS.md:限流" --consumer "网关 middleware 链" \
+  --deliverable "server/middleware/ratelimit.py" --tier 乙 --internal --by 总编排 \
+  --taskbook "docs/tasks/{ticket}.md" --taskbook-unchecked
+# ② 拿着上一步回的单号真把文件写出来(路径里的 {ticket} 服务端已替换成该号)
+# ③ 用同一个路径转「已核存在」——这一步才是真校验文件在不在
+ticket.py set T-000123 --taskbook "docs/tasks/T-000123.md" --by 总编排
 
 # 员工开工第一条
 ticket.py receipt T-000123          # 返工态会把「上一轮为什么被退」一并带进新窗
@@ -473,6 +496,9 @@ python docs/make_screens.py          # 造演示数据 → 起服务 → 拍三�
 **反馈**：某一道闸说不出它防的是哪一次具体事故，就该删。
 发现这类问题、或使用中撞到坑，欢迎开
 [Issue](https://github.com/comkocs/md-first/issues)。
+**1.01 这一版整版都来自一份上服实践反馈**——真装一遍撞到的八条，比读代码读出来的准得多。
+
+**改了什么**：见 [CHANGELOG](../CHANGELOG.md)。
 
 ---
 

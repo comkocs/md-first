@@ -13,9 +13,20 @@ SOURCE=""
 INSTALL_DIR="${INSTALL_DIR:-}"
 SERVICE_NAME="${SERVICE_NAME:-ticket-desk}"
 SERVICE_USER="${SERVICE_USER:-ticket-desk}"
-DESK_PORT="${DESK_PORT:-8443}"
+# ★DESK_PORT 留空时**从 systemd unit 的 --port 现读**,读不到才回落 8443。
+#   写死默认值的坏处不是「配错端口」,是**假红**:端口不是 8443 而人忘了传的时候,
+#   代码已经替换、服务已经起来,后置闸却在 8443 上白等 10 秒然后 exit 3——
+#   人看到「上服失败」,很可能回头再跑一遍,而线上其实早就好了。
+#   假红比真红坏,因为它诱导人去做多余的动作。
+#   同一条路脚本下面读 --token-file 时已经走过一遍:服务用哪个,这里就用哪个。
+DESK_PORT="${DESK_PORT:-}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 NODE_BIN="${NODE_BIN:-node}"
+# ★部署目标可以指定。写死 production 的后果不是配置不灵活,是**串账**:
+#   工单台给自己上服时,会把「production 部署头」那一格覆盖成工单台自己的提交号——
+#   而在拿工单台管别的系统的地方,那一格记的是**被管理的业务系统**的部署头,
+#   是每天都有人看的数。两者撞在同一格里互相盖,谁也不知道自己看到的是哪个。
+DEPLOY_TARGET="${DEPLOY_TARGET:-production}"
 # 闸②的跳过上限:跳过条数超过它就当作没跑。
 MAX_SKIPPED="${MAX_SKIPPED:-15}"
 CHECK_ONLY=0
@@ -26,6 +37,8 @@ while [[ $# -gt 0 ]]; do
     --source) SOURCE="$2"; shift 2 ;;
     --install-dir) INSTALL_DIR="$2"; shift 2 ;;
     --service-name) SERVICE_NAME="$2"; shift 2 ;;
+    --port) DESK_PORT="$2"; shift 2 ;;
+    --target) DEPLOY_TARGET="$2"; shift 2 ;;
     --check-only) CHECK_ONLY=1; shift ;;
     --skip-tests) SKIP_TESTS=1; shift ;;
     --skip-node-check) SKIP_NODE_CHECK=1; shift ;;
@@ -144,11 +157,29 @@ echo "三闸全过,开始替换。"
 # ★只替换 app/ 下的代码。数据库、图片、证书都在 app/ 之外,这里一个字都不碰——
 #   DeployScriptTests 有一条闸按文本守着「本脚本里不许出现指向数据库或图片目录的路径」。
 APP="$INSTALL_DIR/app"
-rm -rf "$APP/ticket_desk" "$APP/web"
+rm -rf "$APP/ticket_desk" "$APP/web" "$APP/deploy"
 install -d -o "$SERVICE_USER" -g "$SERVICE_USER" "$APP"
 cp -a "$SOURCE/ticket_desk" "$APP/ticket_desk"
 [[ -d "$SOURCE/web" ]] && cp -a "$SOURCE/web" "$APP/web"
+# ★deploy/ 跟着一起刷新:install.sh 把它装在 app/ 下(那条 cron 指的就是
+#   app/deploy/backup.sh)。不在这里刷新的话,备份脚本会永远停在首次安装那一版,
+#   而没有人会注意到——cron 静默跑,跑的是哪一版没人看得见。
+[[ -d "$SOURCE/deploy" ]] && cp -a "$SOURCE/deploy" "$APP/deploy"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$APP"
+
+# ★端口现在读:unit 还是替换前那一份,--port 就在里面;读不到才回落 8443。
+#   放在 restart 之前是因为这一步只读不写,而后置闸拿它当唯一判据——
+#   判据取错了,后面那 10 秒白等就是一个假红。
+if [[ -z "$DESK_PORT" ]]; then
+  DESK_PORT="$(systemctl cat "$SERVICE_NAME.service" 2>/dev/null \
+    | grep -oE -- '--port[= ][0-9]+' | head -1 | grep -oE '[0-9]+$' || true)"
+  if [[ -n "$DESK_PORT" ]]; then
+    echo "端口 $DESK_PORT(从 $SERVICE_NAME.service 的 --port 现读)"
+  else
+    DESK_PORT=8443
+    echo "端口 $DESK_PORT(unit 里读不到 --port,按默认值;端口不是它请加 --port <端口>)"
+  fi
+fi
 systemctl restart "$SERVICE_NAME.service"
 
 # ── 后置闸:端口真在听 ──────────────────────────────────────────────
@@ -190,11 +221,11 @@ DEPLOY_HEAD="${DEPLOY_HEAD:-$(cd "$SOURCE" 2>/dev/null && git rev-parse --short=
 if [[ -z "$DEPLOY_HEAD" ]]; then
   echo "上服记录:拿不到部署头(包里既没有 DEPLOY_HEAD 文件也没有 .git),跳过自动建单。" \
        "★正常路径是用 deploy/pack.sh 打包,它会把提交号写进包里;" \
-       "这一次请手工补:ticket.py deploy-record --head <提交号> --probes \"<探针输出>\""
+       "这一次请手工补:ticket.py deploy-record --head <提交号> --repo $DEPLOY_TARGET --probes \"<探针输出>\""
 else
   PROBES="服务 active;$DESK_PORT 在听(后置闸实测);源 $SOURCE"
-  RECORD_JSON=$(printf '{"op":"deploy-record","by":"部署脚本","head":"%s","repo":"production","probes":"%s"}' \
-                "$DEPLOY_HEAD" "$PROBES")
+  RECORD_JSON=$(printf '{"op":"deploy-record","by":"部署脚本","head":"%s","repo":"%s","probes":"%s"}' \
+                "$DEPLOY_HEAD" "$DEPLOY_TARGET" "$PROBES")
   # 令牌自己找,不靠调用者记路径。
   # ★撞到过:带着猜的路径上服时,`TICKET_TOKEN` 是空的,于是又走了「跳过自动建单」,
   #   而部署头其实已经拿到了——差的只是这一步。让脚本自己读,人就不用记第二个路径。
@@ -214,13 +245,13 @@ else
     if curl -sk --max-time 20 -X POST "https://127.0.0.1:$DESK_PORT/api/action" \
          -H "Content-Type: application/json" -H "X-Ticket-Token: ${TICKET_TOKEN}" \
          -d "$RECORD_JSON" -o "$(mktemp)" 2>/dev/null; then
-      echo "上服记录已建(头 $DEPLOY_HEAD);部署头已写进当前值面。取证请另开取证单——取不到图不挡上服。"
+      echo "上服记录已建(头 $DEPLOY_HEAD,目标 $DEPLOY_TARGET);部署头已写进当前值面。取证请另开取证单——取不到图不挡上服。"
     else
       echo "上服记录没建成(不影响本次上服,线上已是 $DEPLOY_HEAD)。" \
-           "请补:ticket.py deploy-record --head $DEPLOY_HEAD --probes \"$PROBES\"" >&2
+           "请补:ticket.py deploy-record --head $DEPLOY_HEAD --repo $DEPLOY_TARGET --probes \"$PROBES\"" >&2
     fi
   else
     echo "上服记录:没有 TICKET_TOKEN,跳过自动建单(不影响本次上服)。" \
-         "请补:ticket.py deploy-record --head $DEPLOY_HEAD --probes \"$PROBES\""
+         "请补:ticket.py deploy-record --head $DEPLOY_HEAD --repo $DEPLOY_TARGET --probes \"$PROBES\""
   fi
 fi

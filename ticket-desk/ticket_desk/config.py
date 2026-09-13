@@ -296,9 +296,15 @@ def cli_path() -> str:
 
 def charter_path(slot: str) -> str:
     """这一位的章程 md 的**约定**路径。工具不建目录、不校验，只用于提示。"""
-    return str(workspace_root() / "_office" / slot / "章程.md")
+    return str(workspace_root() / "_office" / slot / "章程.md").replace("\\", "/")
 
 
 def memory_path_hint() -> str:
-    """工位记忆 md 的约定写法，给报错与 --help 用。"""
-    return str(workspace_root() / "_office" / "<位名>" / "工位记忆" / "<位名-编号>.md")
+    """工位记忆 md 的约定写法，给报错与 --help 用。
+
+    ★一律输出**正斜杠**。这串是给人照抄进命令行的示例，而 `str(Path)` 在 Windows 上
+    产出的是反斜杠——照抄进 bash 会被转义吃掉，第一次照抄的人就写歪了。
+    与 channel.forward_slashes 同一条口径（「反斜杠在 bash 的 source 里会被吃掉，踩过一次」）。
+    正斜杠在 Windows 的 Python 里一样认，两边都能直接用。
+    """
+    return str(workspace_root() / "_office" / "<位名>" / "工位记忆" / "<位名-编号>.md").replace("\\", "/")

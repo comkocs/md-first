@@ -478,10 +478,15 @@ def execute(args: argparse.Namespace, service: TicketService) -> tuple[Any, str]
     command = args.command
     if command == "new":
         if args.type == "派单":
-            if not str(args.consumer).strip():
-                raise TicketError(f"派单必须写实机消费者(本单产物在{LIVE_SCENE}链上被谁加载),填不出=不发车。")
-            if not args.source or not any(str(value).strip() for value in args.source):
-                raise TicketError("派单必须写真源指针(本单执行依据在哪个文件或哪条决定),填不出=不发车。")
+            # ★五条必填一次数完再报,不要撞一条补一条——逐条拒会让人重敲三四遍长命令行,
+            #   而每重敲一遍都是一次手抖的机会。判据与服务端共用同一个方法
+            #   (服务端仍是唯一真闸,这里只是提早把话说全)。
+            missing = TicketService.missing_dispatch_requirements(
+                consumer=args.consumer, sources=args.source, task_tier=args.tier,
+                deliverables=args.deliverable, internal=args.internal, include_entry_gates=True,
+            )
+            if missing:
+                raise TicketError(TicketService.format_missing_requirements(missing))
             ticket = service.create_dispatch(args.slot, args.title, args.source, args.consumer, args.assign, args.by, args.notes, args.tier, args.context_lines, args.deliverable, args.internal, args.body, args.taskbook, _taskbook_check_state(args), window=args.window)
         elif args.type == "疑问":
             ticket = service.create_question("疑问", args.slot, args.title, args.body or args.notes or "请对方总监答复。", args.by, args.source, args.consumer, args.tier or "", args.context_lines, args.taskbook, _taskbook_check_state(args))
