@@ -971,7 +971,35 @@ def _refresh_memory_here(client: RemoteClient, args: argparse.Namespace, text: s
     return "\n".join([*kept, f"{MEMORY_REFRESH_PREFIX}完成:{path}"])
 
 
+def force_utf8_output() -> None:
+    """把 stdout/stderr 强制成 UTF-8。★这个工单台通篇中文,不做这件事在 Windows 上直接不可用。
+
+    Windows 的控制台默认按 locale 编码(简中机器上是 cp936/GBK)。本工具输出的每一句
+    人话都是中文,于是「30 秒跑起来」那三条命令在一台没配过环境变量的 Windows 上,
+    打出来的是 `δ��븴��ϯ��` 这样的一片乱码——**功能全对,一个字看不懂**。
+    这类坏法特别不划算:它不报错、不退非零,只是让人以为这软件坏了。
+
+    ★为什么不写在文档里让人自己设 PYTHONUTF8=1:
+      ① 得先看得懂那句乱码才知道要去查文档;
+      ② 环境变量**传不进子进程之外的地方**——被别的脚本、cron、systemd 调起来时又没了;
+      ③ 每个用户都要做一遍的事,就该由程序自己做一次。
+    ★errors="replace":宁可把个别字符显示成 ?,也不要在写一行日志时抛 UnicodeEncodeError
+      把整条命令带崩——输出编码不该成为业务失败的原因。
+    ★已经是 UTF-8 的(Linux、macOS、设过 PYTHONUTF8 的 Windows)一律不碰。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        encoding = (getattr(stream, "encoding", "") or "").lower().replace("-", "")
+        if encoding != "utf8" and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                # 流被换成了不支持 reconfigure 的东西(测试里的 StringIO、某些管道)。
+                # 这只是显示问题,绝不能因此让整条命令失败。
+                pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    force_utf8_output()
     arguments = list(sys.argv[1:] if argv is None else argv)
     json_output = "--json" in arguments
     # --local:强制本机模式,不看任何远程配置。测试与离线自查用它,保证永远碰不到真服务器。

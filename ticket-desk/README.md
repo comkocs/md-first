@@ -20,7 +20,7 @@
 
 ```bash
 git clone https://github.com/comkocs/md-first.git && cd md-first/ticket-desk
-python -m pytest tests -q                    # 535 条全绿（成绩随「在哪跑」变，见下表）
+python -m pytest tests -q                    # 537 条全绿（成绩随「在哪跑」变，见下表）
 python ticket_desk/ticket.py env             # 一行说清当前是本机模式还是远程模式
 python ticket_desk/ticket.py staff list      # 名册（第一次跑会顺手建库）
 ```
@@ -35,9 +35,9 @@ python ticket_desk/ticket.py staff list      # 名册（第一次跑会顺手建
 
 | 在哪跑 | 成绩 | 那些 skip 是什么 |
 |---|---|---|
-| 完整仓树 | `535 passed` | 无 |
-| 完整仓树，但包目录下有 `config.json` | `534 passed, 1 skipped` | 「包目录下已有 `config.json`（运行者自己的），不覆盖它」 |
-| 上服包 + 服务器（root、无 node） | `529 passed, 6 skipped` | 1 条「root 下会真去动系统目录」+ 5 条「这台机器上没有 node」 |
+| 完整仓树 | `537 passed` | 无 |
+| 完整仓树，但包目录下有 `config.json` | `536 passed, 1 skipped` | 「包目录下已有 `config.json`（运行者自己的），不覆盖它」 |
+| 上服包 + 服务器（root、无 node） | `531 passed, 6 skipped` | 1 条「root 下会真去动系统目录」+ 5 条「这台机器上没有 node」 |
 
 ★**第二种最容易被误判成回归**：凡是给自己配过 `ticket_desk/config.json` 的人，
 一跑测试就会看到那个 skip。它是有意的，不是坏了。

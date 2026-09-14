@@ -693,6 +693,49 @@ class BanLineCountTests(TicketTestCase):
         self.assertIn("model-c", self.service.store.load_staff()["模型停用"]["全项目"])
 
 
+class ChineseOutputSurvivesNonUtf8ConsoleTests(unittest.TestCase):
+    """本工具通篇中文:控制台不是 UTF-8 时,输出也必须是看得懂的中文。
+
+    ★这个坏法在 Windows 上对**每一个新用户**都成立:控制台默认按 locale 编码
+      (简中机器是 cp936/GBK),于是 README 里「30 秒跑起来」那三条命令打出来是
+      一片乱码——功能全对、退出码是 0、一个字看不懂。
+      不报错也不退非零的坏法最不划算:人只会以为这软件坏了。
+
+    ★这一组为什么必须**自己造环境**、不能用 clean_environment():
+      那个帮手里写着 PYTHONIOENCODING="utf-8"——测试子进程一直被喂着这个变量,
+      于是这个 bug 在全绿的用例里一直没露头。
+      **一个把自己要测的条件预先设好的用例,测不到那个条件不成立时的行为。**
+      这里显式把它设成 gbk,去逼出真实形态。
+    """
+
+    @staticmethod
+    def run_with_console_encoding(encoding: str, tickets_root: Path) -> subprocess.CompletedProcess:
+        environment = {k: v for k, v in os.environ.items() if k not in CHANNEL_VARIABLES}
+        environment["TICKET_ROOT"] = str(tickets_root)
+        environment["PYTHONIOENCODING"] = encoding      # ★故意不是 utf-8
+        environment.pop("PYTHONUTF8", None)             # ★也不许靠它兜底
+        return subprocess.run(
+            [*CLI, "state", "get", "--local"], cwd=ROOT, env=environment,
+            capture_output=True, encoding="utf-8", errors="replace", text=True,
+        )
+
+    def test_chinese_is_readable_even_when_the_console_is_gbk(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            done = self.run_with_console_encoding("gbk", Path(temporary) / "tickets")
+        self.assertEqual(0, done.returncode, done.stdout + done.stderr)
+        text = done.stdout + done.stderr
+        # 断言的是**真的中文**,不是「没报错」:乱码时这里全是解不开的字节
+        self.assertIn("值", text, f"GBK 控制台下中文成了乱码:{text[:120]}")
+        self.assertNotIn("�", text, f"输出里有解码不了的字节(乱码):{text[:120]}")
+
+    def test_utf8_console_is_left_alone(self):
+        """★反面:本来就是 UTF-8 的(Linux / macOS / 设过 PYTHONUTF8 的 Windows)行为不变。"""
+        with tempfile.TemporaryDirectory() as temporary:
+            done = self.run_with_console_encoding("utf-8", Path(temporary) / "tickets")
+        self.assertEqual(0, done.returncode, done.stdout + done.stderr)
+        self.assertIn("值", done.stdout + done.stderr)
+
+
 class SlotRosterFollowsConfigTests(unittest.TestCase):
     """位名成员必须跟着 config 走;手改项(主力模型集合 / 模型名册 / 停用阈值)一个字不许被回写。
 
