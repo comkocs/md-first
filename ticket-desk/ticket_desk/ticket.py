@@ -313,7 +313,13 @@ def parser() -> argparse.ArgumentParser:
     inbox = commands.add_parser("inbox")
     inbox.add_argument("--slot", required=True)
     inbox.add_argument("--for", dest="actor", required=True)
-    inbox.add_argument("--mark-read", action="store_true")
+    # ★读完即标已读是**默认**行为,不靠谁记得加参数——
+    #   要人记住的一步就是设计缺陷(见 README「第一原则」)。
+    #   --mark-read 保留只为向后兼容:老脚本照旧能跑,它现在等于什么都不加。
+    inbox.add_argument("--mark-read", action="store_true",
+                       help="（已经是默认行为，保留只为兼容老脚本）")
+    inbox.add_argument("--peek", action="store_true",
+                       help="只看一眼，不标已读")
 
     staff = commands.add_parser("staff")
     staff_commands = staff.add_subparsers(dest="staff_command", required=True)
@@ -621,7 +627,8 @@ def execute(args: argparse.Namespace, service: TicketService) -> tuple[Any, str]
         row = service.say(args.slot, args.by, args.text, args.img, args.ref)
         return row, f"已写入 {args.slot} 对话线 · {row['时间']}"
     if command == "inbox":
-        rows = service.inbox(args.slot, args.actor, args.mark_read)
+        # --peek 是唯一会关掉「标已读」的开关;不给就是标(默认)。
+        rows = service.inbox(args.slot, args.actor, not args.peek)
         text = "\n".join(f"{row['时间']} · {row['发言人']}：{row['文字']}" + (f"（引用 {row['引用工单号']}）" if row.get("引用工单号") else "") for row in rows)
         # T-000957 R1：每位第 0 步都跑 inbox，把「你位还欠几张没答」挂在它尾巴上，谁都漏不掉。
         pending = service.pending_answer_line(args.slot)
@@ -1159,7 +1166,8 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
         mutating = args.command in {"new", "set", "void", "claim", "attach", "submit", "judge", "verify", "deploy-record", "evidence-ticket", "merge", "live", "close", "block", "unblock", "transfer", "ask", "answer", "say", "export", "build", "demo", "taskbook-check"}
-        mutating = mutating or (args.command == "inbox" and args.mark_read) or args.command == "staff"
+        # inbox 默认要写「已读标记」,所以它默认算写操作;只有 --peek 是纯读。
+        mutating = mutating or (args.command == "inbox" and not args.peek) or args.command == "staff"
         mutating = mutating or (args.command == "state" and args.state_command == "set")
         if mutating:
             with service.store.locked():

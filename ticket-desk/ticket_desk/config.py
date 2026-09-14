@@ -75,6 +75,15 @@ DEFAULTS: dict[str, Any] = {
     # 建议开窗平台的合法值。写进派单标题开头的【X】里;建议不是硬闸,留空一律放行。
     "开窗平台": ["claude", "codex", "vscode", "zcode"],
 
+    # ★本机约束:每张派单的开窗指令都会**自动带上**这几行,不靠谁去抄。
+    #   放这里的是「这台机器上干活必须知道、而且每次都一样」的事——
+    #   例如:先在哪儿建自己的工作树、走不走代理、哪些端口不许碰、编码怎么设。
+    #   为什么要自动带:抄漏一条的后果往往半小时后才出现(在共享仓根上写了代码、
+    #   拉不动外网还去扫端口),而那时人已经不记得自己抄漏了什么。
+    #   ★要人记住的一步,就是设计缺陷——能让程序带上的,别写进文档让人抄。
+    #   留空清单就完全不出现,单机自用的人不用管这一项。
+    "本机约束": [],
+
     # 模型名册。「任务档上限」= 这个模型最高能吃哪一档任务书(甲>乙>丙)。
     # 「状态」∈ 可用 / 需总编排批准 / 退役。退役的模型不能再 staff new,历史记录保留。
     "主力模型集合": ["model-a", "model-b", "model-e"],
@@ -203,6 +212,7 @@ CONTENT_SLOT: str = str(_VALUES["内容位"])
 DISPATCH_FORBIDDEN_SLOTS: tuple[str, ...] = tuple(_VALUES["只分发不派单位"])
 OWNER_ROLE: str = str(_VALUES["拍板人"])
 WINDOW_PLATFORMS: tuple[str, ...] = tuple(_VALUES["开窗平台"])
+LOCAL_CONSTRAINTS: tuple[str, ...] = tuple(_VALUES["本机约束"])
 LIVE_SCENE: str = str(_VALUES["主场景"])
 BUNDLE_GLOBAL: str = str(_VALUES["离线包全局名"])
 GATE_REPORT_ITEMS: tuple[str, ...] = tuple(_VALUES["机器闸项"])

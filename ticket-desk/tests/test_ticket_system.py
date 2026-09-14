@@ -693,6 +693,49 @@ class BanLineCountTests(TicketTestCase):
         self.assertIn("model-c", self.service.store.load_staff()["模型停用"]["全项目"])
 
 
+class LocalConstraintsRideAlongTests(TicketTestCase):
+    """本机约束自动挂进开窗指令,不靠谁去抄。
+
+    ★这一条的由来:开窗指令里要人手抄一串「这台机器上的规矩」
+      (先在哪儿建自己的工作树、走不走代理、哪些端口不许碰)。
+      抄漏一条的后果往往半小时后才出现——在共享仓根上写了代码、拉不动外网还去扫端口——
+      而那时人已经不记得自己漏抄了什么。**要人记住的一步,就是设计缺陷。**
+    ★默认留空:单机自用的人一个字都不该多看见(下面第二条反面钉这件事)。
+    """
+
+    def dispatch_with(self, constraints: tuple[str, ...]):
+        self.serial = getattr(self, "serial", 0) + 1
+        taskbook = self.root / f"约束-{self.serial}.md"
+        taskbook.write_text("# 任务书\n", encoding="utf-8")
+        ticket = self.service.create_dispatch(
+            SLOT, "带本机约束", ["DECISIONS.md:测试"], "工单台", self.worker,
+            task_tier="乙", deliverables=[str(self.deliverable)], internal=True, taskbook=str(taskbook),
+        )
+        with mock.patch.object(service_module.config, "LOCAL_CONSTRAINTS", constraints):
+            return self.service.dispatch_instructions(ticket)
+
+    def test_constraints_are_appended_to_the_line_the_worker_reads(self):
+        lines = self.dispatch_with(("先建自己的工作树,别在仓根写", "外网走代理 127.0.0.1:7890"))
+        self.assertEqual(3, len(lines), "还是三行,不许多出一行来")
+        self.assertIn("本机约束(每条都要照做):", lines[1])
+        self.assertIn("1.先建自己的工作树,别在仓根写", lines[1])
+        self.assertIn("2.外网走代理 127.0.0.1:7890", lines[1])
+        # ★必须挂在**第二行**:那是原样贴进员工窗给 AI 读的那一行;
+        #   挂到第三行(只给拍板人看的操作提示)等于没挂。
+        self.assertNotIn("本机约束", lines[0])
+        self.assertNotIn("本机约束", lines[2])
+
+    def test_empty_by_default_changes_nothing(self):
+        """★反面:留空(默认)时三行里一个字都不多——一个人配了约束,不能把没配的人也改掉。"""
+        lines = self.dispatch_with(())
+        self.assertEqual(3, len(lines))
+        self.assertNotIn("本机约束", "\n".join(lines))
+        # 第二行结尾就是原来那句,后面什么都没接
+        self.assertTrue(lines[1].endswith("这是任务不是资料,读完立即开工。"), lines[1])
+        # 默认配置里这一项就是空的——留空是默认,不是要人去设
+        self.assertEqual((), tuple(service_module.config.LOCAL_CONSTRAINTS))
+
+
 class ChineseOutputSurvivesNonUtf8ConsoleTests(unittest.TestCase):
     """本工具通篇中文:控制台不是 UTF-8 时,输出也必须是看得懂的中文。
 
@@ -1486,12 +1529,27 @@ class StaffAndConversationTests(TicketTestCase):
         history = self.service.history(self.worker)
         self.assertEqual([ticket["编号"]], [row["编号"] for row in history["工单"]])
 
-    def test_say_inbox_mark_read_and_slot_isolation(self):
+    def test_inbox_marks_read_by_default_and_peek_does_not(self):
+        """★读完即标已读是**默认**。原来默认不标,要人另外记得跑一次 --mark-read,
+        于是台面上「要你去唤醒的窗口」永远亮着——一个永远亮着的提醒等于没有提醒。
+        要人记住的一步就是设计缺陷,所以这里把方向翻过来钉。"""
         self.service.say(SLOT, "设计者", "请检查", reference="")
         self.service.say(OTHER_SLOT, "设计者", "另一个位")
+        # ① 默认读一次就标掉了:第二次读是空的
         rows = self.service.inbox(SLOT, "总编排")
         self.assertEqual(["请检查"], [row["文字"] for row in rows])
-        self.assertEqual(1, len(self.service.inbox(SLOT, "总编排", True)))
+        self.assertEqual([], self.service.inbox(SLOT, "总编排"), "默认就该标已读")
+        # ② 位与位之间互不串:别位那条还在
+        self.assertEqual(["另一个位"], [row["文字"] for row in self.service.inbox(OTHER_SLOT, "总编排")])
+
+    def test_peek_reads_without_marking(self):
+        """★反面:显式只看一眼的,一个字都不许动已读状态——否则「只看看」就成了不可逆操作。"""
+        self.service.say(SLOT, "设计者", "看一眼不要标", reference="")
+        for _ in range(3):
+            rows = self.service.inbox(SLOT, "总编排", False)
+            self.assertEqual(["看一眼不要标"], [row["文字"] for row in rows], "peek 连看三次都该在")
+        # 真读一次之后才消失
+        self.assertEqual(1, len(self.service.inbox(SLOT, "总编排")))
         self.assertEqual([], self.service.inbox(SLOT, "总编排"))
 
 
@@ -3779,9 +3837,11 @@ class TicketSeventeenRegressionTests(unittest.TestCase):
         self.assertFalse(self.store.threads_dir.exists())
         self.service.say(SLOT, "总编排", "第一条")
         self.service.say(SLOT, "设计者", "第二条")
-        self.assertEqual(2, len(self.service.inbox(SLOT, SLOT)))
+        # peek 看几次都不动状态；真读那一次才写「已读标记」。
+        self.assertEqual(2, len(self.service.inbox(SLOT, SLOT, mark_read=False)))
+        self.assertEqual(2, len(self.service.inbox(SLOT, SLOT, mark_read=False)))
 
-        self.assertEqual(2, len(self.service.inbox(SLOT, SLOT, mark_read=True)))
+        self.assertEqual(2, len(self.service.inbox(SLOT, SLOT)))    # 默认标已读
 
         self.assertEqual([], self.service.inbox(SLOT, SLOT))
         rows = self.rows_in_threads_table(SLOT)

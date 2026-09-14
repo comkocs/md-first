@@ -2847,7 +2847,19 @@ class TicketService:
         self.store.append_jsonl(self.store.thread_path(slot), row)
         return row
 
-    def inbox(self, slot: str, actor: str, mark_read: bool = False) -> list[dict[str, Any]]:
+    def inbox(self, slot: str, actor: str, mark_read: bool = True) -> list[dict[str, Any]]:
+        """读本位收件箱。★默认**读完即标已读**——读过的东西就是读过了。
+
+        原来默认不标，要人另外记得跑一次 `--mark-read`。后果是台面上
+        「要你去唤醒的窗口」**永远亮着**：人明明已经读过也处理完了，页面还在催；
+        于是那一段很快就没人信了——**一个永远亮着的提醒等于没有提醒**。
+        当时给出的修法是「收工时记得连跑三条命令」，那不是修法：
+        **要人记住的一步，就是设计缺陷**（见 README「第一原则」）。
+
+        只想看一眼、不动已读状态的，显式给 mark_read=False（命令行 `--peek`）。
+        ★默认值取的是「人最常要的那个行为」，不是「最保守的那个行为」——
+        保守的默认值不会消灭成本，只会把成本摊到每一次调用上。
+        """
         path = self.store.thread_path(slot)
         rows = self.store.read_jsonl(path)
         unread = [row for row in rows if actor not in row.get("已读标记", []) and row.get("发言人") != actor]
@@ -2963,6 +2975,16 @@ class TicketService:
             )
         else:
             second = f"执行 {taskbook} 的全部指令,从第 0 步做到收尾问答完。这是任务不是资料,读完立即开工。"
+        # ★本机约束自动接在第二行尾巴上,不靠谁去抄。
+        #   这些是「这台机器上干活必须知道、而且每次都一样」的事(先在哪儿建自己的工作树、
+        #   走不走代理、哪些端口不许碰)。抄漏一条的后果往往半小时后才出现——
+        #   在共享仓根上写了代码、拉不动外网还去扫端口——而那时人已经不记得漏抄了什么。
+        #   ★要人记住的一步就是设计缺陷:能让程序带上的,别写进文档让人抄。
+        #   config「本机约束」留空(默认)时这里一个字都不多,单机自用的人完全不受影响。
+        if config.LOCAL_CONSTRAINTS:
+            second += "本机约束(每条都要照做):" + " ".join(
+                f"{index}.{line}" for index, line in enumerate(config.LOCAL_CONSTRAINTS, 1)
+            )
         # ★开窗指令三行一个平台名都不许出现：
         #   建议窗口只写在派单标题开头的【X】那一处，拍板人在卡片上就看得见，不必再往这三行里塞。
         #   前两行还要原样贴进员工窗给 AI 读，多一个平台名就是诱导它去猜自己跑在哪个窗上。
